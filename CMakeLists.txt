@@ -60,7 +60,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   endif()
 
   set(PACKAGE_NAME libcxxabi)
-  set(PACKAGE_VERSION 3.6.0svn)
+  set(PACKAGE_VERSION 3.7.0svn)
   set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
   set(PACKAGE_BUGREPORT "llvmbugs@cs.uiuc.edu")
 
@@ -89,12 +89,16 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(LLVM_INCLUDE_TESTS OFF)
   endif()
 
-  set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+  set(LIBCXXABI_LIBDIR_SUFFIX "" CACHE STRING
+      "Define suffix of library directory name (32/64)")
+
+  set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib${LIBCXXABI_LIBDIR_SUFFIX})
+  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib${LIBCXXABI_LIBDIR_SUFFIX})
 
   set(LIBCXXABI_BUILT_STANDALONE 1)
 else()
   set(LLVM_LIT "${CMAKE_SOURCE_DIR}/utils/lit/lit.py")
+  set(LIBCXXABI_LIBDIR_SUFFIX ${LLVM_LIBDIR_SUFFIX})
 endif()
 
 #===============================================================================
@@ -107,6 +111,8 @@ option(LIBCXXABI_ENABLE_PEDANTIC "Compile with pedantic enabled." ON)
 option(LIBCXXABI_ENABLE_WERROR "Fail and stop if a warning is triggered." OFF)
 option(LIBCXXABI_USE_LLVM_UNWINDER "Build and use the LLVM unwinder." OFF)
 option(LIBCXXABI_ENABLE_THREADS "Build with threads enabled" ON)
+set(LIBCXXABI_GCC_TOOLCHAIN "" CACHE STRING "GCC toolchain for cross compiling.")
+set(LIBCXXABI_SYSROOT "" CACHE STRING "Sysroot for cross compiling.")
 
 # Default to building a shared library so that the default options still test
 # the libc++abi that is being built. There are two problems with testing a
@@ -141,6 +147,11 @@ set(CMAKE_MODULE_PATH
 
 # Configure compiler.
 include(config-ix)
+
+set(LIBCXXABI_COMPILER    ${CMAKE_CXX_COMPILER})
+set(LIBCXXABI_SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR})
+set(LIBCXXABI_BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR})
+set(LIBCXXABI_LIBRARY_DIR ${CMAKE_BINARY_DIR}/lib${LIBCXXABI_LIBDIR_SUFFIX})
 
 #===============================================================================
 # Setup Compiler Flags
@@ -236,6 +247,12 @@ if (MSVC)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 endif()
 
+append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_TARGET_TRIPLE
+          "-target ${LIBCXXABI_TARGET_TRIPLE}")
+append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_GCC_TOOLCHAIN
+         "-gcc-toolchain ${LIBCXXABI_GCC_TOOLCHAIN}")
+append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_SYSROOT
+          "--sysroot ${LIBCXXABI_SYSROOT}")
 string(REPLACE ";" " " LIBCXXABI_CXX_FLAGS "${LIBCXXABI_CXX_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${LIBCXXABI_CXX_FLAGS}")
 
