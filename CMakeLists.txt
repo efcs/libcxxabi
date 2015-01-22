@@ -164,6 +164,7 @@ macro(append_if list condition var)
   endif()
 endmacro()
 
+set(LIBCXXABI_C_FLAGS "")
 set(LIBCXXABI_CXX_FLAGS "")
 set(LIBCXXABI_COMPILE_FLAGS "")
 set(LIBCXXABI_LINK_FLAGS "")
@@ -216,6 +217,8 @@ endif()
 append_if(LIBCXXABI_CXX_FLAGS LIBCXXABI_HAS_FSTRICT_ALIASING_FLAG -fstrict-aliasing)
 append_if(LIBCXXABI_CXX_FLAGS LIBCXXABI_HAS_EHSC_FLAG -EHsc)
 
+append_if(LIBCXXABI_C_FLAGS LIBCXXABI_HAS_FUNWIND_TABLES -funwind-tables)
+
 # Assert
 string(TOUPPER "${CMAKE_BUILD_TYPE}" uppercase_CMAKE_BUILD_TYPE)
 if (LIBCXXABI_ENABLE_ASSERTIONS)
@@ -247,6 +250,11 @@ if (MSVC)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 endif()
 
+# Define LIBCXXABI_USE_LLVM_UNWINDER for conditional compilation.
+if (LIBCXXABI_USE_LLVM_UNWINDER)
+  add_definitions(-DLIBCXXABI_USE_LLVM_UNWINDER=1)
+endif()
+
 append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_TARGET_TRIPLE
           "-target ${LIBCXXABI_TARGET_TRIPLE}")
 append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_GCC_TOOLCHAIN
@@ -255,6 +263,7 @@ append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_SYSROOT
           "--sysroot ${LIBCXXABI_SYSROOT}")
 string(REPLACE ";" " " LIBCXXABI_CXX_FLAGS "${LIBCXXABI_CXX_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${LIBCXXABI_CXX_FLAGS}")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${LIBCXXABI_C_FLAGS}")
 
 #===============================================================================
 # Setup Source Code
