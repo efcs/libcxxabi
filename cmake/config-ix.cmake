@@ -1,7 +1,9 @@
 include(CheckLibraryExists)
+include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
 
 # Check compiler flags
+check_c_compiler_flag(-funwind-tables         LIBCXXABI_HAS_FUNWIND_TABLES)
 check_cxx_compiler_flag(-fPIC                 LIBCXXABI_HAS_FPIC_FLAG)
 check_cxx_compiler_flag(-fstrict-aliasing     LIBCXXABI_HAS_FSTRICT_ALIASING_FLAG)
 check_cxx_compiler_flag(-nodefaultlibs        LIBCXXABI_HAS_NODEFAULTLIBS_FLAG)
@@ -23,6 +25,7 @@ check_cxx_compiler_flag(-Wsign-compare        LIBCXXABI_HAS_WSIGN_COMPARE_FLAG)
 check_cxx_compiler_flag(-Wshadow              LIBCXXABI_HAS_WSHADOW_FLAG)
 check_cxx_compiler_flag(-Wconversion          LIBCXXABI_HAS_WCONVERSION_FLAG)
 check_cxx_compiler_flag(-Wnewline-eof         LIBCXXABI_HAS_WNEWLINE_EOF_FLAG)
+check_cxx_compiler_flag(-Wundef               LIBCXXABI_HAS_WUNDEF_FLAG)
 check_cxx_compiler_flag(-pedantic             LIBCXXABI_HAS_PEDANTIC_FLAG)
 check_cxx_compiler_flag(-Werror               LIBCXXABI_HAS_WERROR_FLAG)
 check_cxx_compiler_flag(-Wno-error            LIBCXXABI_HAS_WNO_ERROR_FLAG)
@@ -38,3 +41,5 @@ check_library_exists(c printf "" LIBCXXABI_HAS_C_LIB)
 check_library_exists(dl dladdr "" LIBCXXABI_HAS_DL_LIB)
 check_library_exists(pthread pthread_once "" LIBCXXABI_HAS_PTHREAD_LIB)
 check_library_exists(gcc_eh _Unwind_GetRegionStart "" LIBCXXABI_HAS_GCC_EH_LIB)
+check_library_exists(c __cxa_thread_atexit_impl ""
+  LIBCXXABI_HAS_CXA_THREAD_ATEXIT_IMPL)

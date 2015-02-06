@@ -4,6 +4,10 @@
 
 cmake_minimum_required(VERSION 2.8.8)
 
+if(POLICY CMP0042)
+  cmake_policy(SET CMP0042 NEW) # Set MACOSX_RPATH=YES by default
+endif()
+
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   project(libcxxabi)
 
@@ -60,7 +64,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   endif()
 
   set(PACKAGE_NAME libcxxabi)
-  set(PACKAGE_VERSION 3.6.0svn)
+  set(PACKAGE_VERSION 3.7.0svn)
   set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
   set(PACKAGE_BUGREPORT "llvmbugs@cs.uiuc.edu")
 
@@ -89,12 +93,17 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(LLVM_INCLUDE_TESTS OFF)
   endif()
 
-  set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+  set(LIBCXXABI_LIBDIR_SUFFIX "" CACHE STRING
+      "Define suffix of library directory name (32/64)")
+
+  set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib${LIBCXXABI_LIBDIR_SUFFIX})
+  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib${LIBCXXABI_LIBDIR_SUFFIX})
 
   set(LIBCXXABI_BUILT_STANDALONE 1)
 else()
+  set(LLVM_MAIN_SRC_DIR "${CMAKE_SOURCE_DIR}" CACHE PATH "Path to LLVM source tree")
   set(LLVM_LIT "${CMAKE_SOURCE_DIR}/utils/lit/lit.py")
+  set(LIBCXXABI_LIBDIR_SUFFIX ${LLVM_LIBDIR_SUFFIX})
 endif()
 
 #===============================================================================
@@ -106,6 +115,9 @@ option(LIBCXXABI_ENABLE_ASSERTIONS "Enable assertions independent of build mode.
 option(LIBCXXABI_ENABLE_PEDANTIC "Compile with pedantic enabled." ON)
 option(LIBCXXABI_ENABLE_WERROR "Fail and stop if a warning is triggered." OFF)
 option(LIBCXXABI_USE_LLVM_UNWINDER "Build and use the LLVM unwinder." OFF)
+option(LIBCXXABI_ENABLE_THREADS "Build with threads enabled" ON)
+set(LIBCXXABI_GCC_TOOLCHAIN "" CACHE STRING "GCC toolchain for cross compiling.")
+set(LIBCXXABI_SYSROOT "" CACHE STRING "Sysroot for cross compiling.")
 
 # Default to building a shared library so that the default options still test
 # the libc++abi that is being built. There are two problems with testing a
@@ -119,13 +131,31 @@ find_path(
   LIBCXXABI_LIBCXX_INCLUDES
   vector
   PATHS ${LIBCXXABI_LIBCXX_INCLUDES}
+        ${LIBCXXABI_LIBCXX_PATH}/include
         ${CMAKE_BINARY_DIR}/${LIBCXXABI_LIBCXX_INCLUDES}
         ${LLVM_MAIN_SRC_DIR}/projects/libcxx/include
         ${LLVM_INCLUDE_DIR}/c++/v1
   )
 
-set(LIBCXXABI_LIBCXX_INCLUDES "${LIBCXXABI_LIBCXX_INCLUDES}" CACHE STRING
+set(LIBCXXABI_LIBCXX_INCLUDES "${LIBCXXABI_LIBCXX_INCLUDES}" CACHE PATH
     "Specify path to libc++ includes." FORCE)
+
+find_path(
+  LIBCXXABI_LIBCXX_PATH
+  test/libcxx/__init__.py
+  PATHS ${LIBCXXABI_LIBCXX_PATH}
+        ${LIBCXXABI_LIBCXX_INCLUDES}/../
+        ${LLVM_MAIN_SRC_DIR}/projects/libcxx/
+  NO_DEFAULT_PATH
+  )
+
+if (LIBCXXABI_LIBCXX_PATH STREQUAL "LIBCXXABI_LIBCXX_PATH-NOTFOUND")
+  message(WARNING "LIBCXXABI_LIBCXX_PATH was not specified and couldn't be infered.")
+  set(LIBCXXABI_LIBCXX_PATH "")
+endif()
+
+set(LIBCXXABI_LIBCXX_PATH "${LIBCXXABI_LIBCXX_PATH}" CACHE PATH
+    "Specify path to libc++ source." FORCE)
 
 #===============================================================================
 # Configure System
@@ -141,6 +171,11 @@ set(CMAKE_MODULE_PATH
 # Configure compiler.
 include(config-ix)
 
+set(LIBCXXABI_COMPILER    ${CMAKE_CXX_COMPILER})
+set(LIBCXXABI_SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR})
+set(LIBCXXABI_BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR})
+set(LIBCXXABI_LIBRARY_DIR ${CMAKE_BINARY_DIR}/lib${LIBCXXABI_LIBDIR_SUFFIX})
+
 #===============================================================================
 # Setup Compiler Flags
 #===============================================================================
@@ -152,6 +187,7 @@ macro(append_if list condition var)
   endif()
 endmacro()
 
+set(LIBCXXABI_C_FLAGS "")
 set(LIBCXXABI_CXX_FLAGS "")
 set(LIBCXXABI_COMPILE_FLAGS "")
 set(LIBCXXABI_LINK_FLAGS "")
@@ -185,6 +221,7 @@ append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_HAS_WSTRICT_OVERFLOW_FLAG -Wstrict-o
 append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_HAS_WUNUSED_PARAMETER_FLAG -Wunused-parameter)
 append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_HAS_WUNUSED_VARIABLE_FLAG -Wunused-variable)
 append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_HAS_WWRITE_STRINGS_FLAG -Wwrite-strings)
+append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_HAS_WUNDEF_FLAG -Wundef)
 
 if (LIBCXXABI_ENABLE_WERROR)
   append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_HAS_WERROR_FLAG -Werror)
@@ -203,6 +240,8 @@ endif()
 # functions never throw a C++ exception.
 append_if(LIBCXXABI_CXX_FLAGS LIBCXXABI_HAS_FSTRICT_ALIASING_FLAG -fstrict-aliasing)
 append_if(LIBCXXABI_CXX_FLAGS LIBCXXABI_HAS_EHSC_FLAG -EHsc)
+
+append_if(LIBCXXABI_C_FLAGS LIBCXXABI_HAS_FUNWIND_TABLES -funwind-tables)
 
 # Assert
 string(TOUPPER "${CMAKE_BUILD_TYPE}" uppercase_CMAKE_BUILD_TYPE)
@@ -226,13 +265,29 @@ if (NOT LIBCXXABI_ENABLE_SHARED)
   list(APPEND LIBCXXABI_COMPILE_FLAGS -D_LIBCPP_BUILD_STATIC)
 endif()
 
+if (NOT LIBCXXABI_ENABLE_THREADS)
+  add_definitions(-DLIBCXXABI_HAS_NO_THREADS=1)
+endif()
+
 # This is the _ONLY_ place where add_definitions is called.
 if (MSVC)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 endif()
 
+# Define LIBCXXABI_USE_LLVM_UNWINDER for conditional compilation.
+if (LIBCXXABI_USE_LLVM_UNWINDER)
+  add_definitions(-DLIBCXXABI_USE_LLVM_UNWINDER=1)
+endif()
+
+append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_TARGET_TRIPLE
+          "-target ${LIBCXXABI_TARGET_TRIPLE}")
+append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_GCC_TOOLCHAIN
+         "-gcc-toolchain ${LIBCXXABI_GCC_TOOLCHAIN}")
+append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_SYSROOT
+          "--sysroot ${LIBCXXABI_SYSROOT}")
 string(REPLACE ";" " " LIBCXXABI_CXX_FLAGS "${LIBCXXABI_CXX_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${LIBCXXABI_CXX_FLAGS}")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${LIBCXXABI_C_FLAGS}")
 
 #===============================================================================
 # Setup Source Code
@@ -260,3 +315,10 @@ if(NOT LIBCXXABI_ENABLE_SHARED)
 else()
   add_subdirectory(test)
 endif()
+
+install(DIRECTORY include/
+  DESTINATION include
+  FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN ".svn" EXCLUDE
+)

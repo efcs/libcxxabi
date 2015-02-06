@@ -19,6 +19,10 @@ set(LIBCXXABI_SOURCES
   typeinfo.cpp
 )
 
+if (UNIX AND NOT (APPLE OR CYGWIN))
+  list(APPEND LIBCXXABI_SOURCES cxa_thread_atexit.cpp)
+endif()
+
 set(LIBCXXABI_HEADERS ../include/cxxabi.h)
 
 # Add all the headers to the project for IDEs.
@@ -44,10 +48,16 @@ endif()
 
 include_directories("${LIBCXXABI_LIBCXX_INCLUDES}")
 
+if (LIBCXXABI_HAS_CXA_THREAD_ATEXIT_IMPL)
+  add_definitions(-DHAVE___CXA_THREAD_ATEXIT_IMPL)
+endif()
+
 # Generate library list.
 set(libraries ${LIBCXXABI_CXX_ABI_LIBRARIES})
 append_if(libraries LIBCXXABI_HAS_C_LIB c)
-append_if(libraries LIBCXXABI_HAS_PTHREAD_LIB pthread)
+if (LIBCXXABI_ENABLE_THREADS)
+  append_if(libraries LIBCXXABI_HAS_PTHREAD_LIB pthread)
+endif()
 
 if (LIBCXXABI_USE_LLVM_UNWINDER)
   list(APPEND libraries unwind)
@@ -89,6 +99,6 @@ set_target_properties(cxxabi
   )
 
 install(TARGETS cxxabi
-  LIBRARY DESTINATION lib${LLVM_LIBDIR_SUFFIX}
-  ARCHIVE DESTINATION lib${LLVM_LIBDIR_SUFFIX}
+  LIBRARY DESTINATION lib${LIBCXXABI_LIBDIR_SUFFIX}
+  ARCHIVE DESTINATION lib${LIBCXXABI_LIBDIR_SUFFIX}
   )
