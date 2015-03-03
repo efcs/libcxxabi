@@ -35,6 +35,9 @@ using namespace libunwind;
 /// internal object to represent this processes address space
 LocalAddressSpace LocalAddressSpace::sThisAddressSpace;
 
+_LIBUNWIND_EXPORT unw_addr_space_t unw_local_addr_space =
+    (unw_addr_space_t)&LocalAddressSpace::sThisAddressSpace;
+
 /// record the registers and stack position of the caller
 extern int unw_getcontext(unw_context_t *);
 // note: unw_getcontext() implemented in assembly
@@ -70,16 +73,12 @@ _LIBUNWIND_EXPORT int unw_init_local(unw_cursor_t *cursor,
 }
 
 #ifdef UNW_REMOTE
-
-_LIBUNWIND_EXPORT unw_addr_space_t unw_local_addr_space =
-    (unw_addr_space_t) & sThisAddressSpace;
-
 /// Create a cursor into a thread in another process.
 _LIBUNWIND_EXPORT int unw_init_remote_thread(unw_cursor_t *cursor,
                                              unw_addr_space_t as,
                                              void *arg) {
   // special case: unw_init_remote(xx, unw_local_addr_space, xx)
-  if (as == (unw_addr_space_t) & sThisAddressSpace)
+  if (as == (unw_addr_space_t)&LocalAddressSpace::sThisAddressSpace)
     return unw_init_local(cursor, NULL); //FIXME
 
   // use "placement new" to allocate UnwindCursor in the cursor buffer
@@ -310,7 +309,8 @@ _LIBUNWIND_EXPORT void unw_save_vfp_as_X(unw_cursor_t *cursor) {
 /// SPI: walks cached dwarf entries
 _LIBUNWIND_EXPORT void unw_iterate_dwarf_unwind_cache(void (*func)(
     unw_word_t ip_start, unw_word_t ip_end, unw_word_t fde, unw_word_t mh)) {
-  _LIBUNWIND_TRACE_API("unw_iterate_dwarf_unwind_cache(func=%p)\n", func);
+  _LIBUNWIND_TRACE_API("unw_iterate_dwarf_unwind_cache(func=%p)\n",
+                       reinterpret_cast<void *>(func));
   DwarfFDECache<LocalAddressSpace>::iterateCacheEntries(func);
 }
 
