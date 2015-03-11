@@ -407,15 +407,18 @@ __pointer_type_info::can_catch(const __shim_type_info* thrown_type,
             return false;
         if (~member_ptr_type->__flags & thrown_member_ptr_type->__flags)
             return false;
-        if (!member_ptr_type->can_catch(thrown_member_ptr_type, adjustedPtr))
-            return false;
-        if (!is_equal(member_ptr_type->__context, thrown_member_ptr_type->__context, false))
-            return false;
+        if (member_ptr_type->can_catch(thrown_member_ptr_type, adjustedPtr))
+            return true;
+        if (is_equal(member_ptr_type->__context, thrown_member_ptr_type->__context, false)) {
+           
         //if (!is_equal(member_ptr_type->__pointee, thrown_member_ptr_type->__pointee, false))
         //    return false;
         if (adjustedPtr != NULL)
             adjustedPtr = *static_cast<void**>(adjustedPtr);
+        
         return true;
+        }
+        return false;
     }
 
     // Handle pointer to class type
