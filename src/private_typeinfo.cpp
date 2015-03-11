@@ -398,23 +398,22 @@ __pointer_type_info::can_catch(const __shim_type_info* thrown_type,
     }
 
     // Handle pointer to pointer to member
-    const __pointer_to_member_type_info* member_catch_type =
+    const __pointer_to_member_type_info* member_ptr_type =
         dynamic_cast<const __pointer_to_member_type_info*>(__pointee);
-    if (member_catch_type) {
-        const __pointer_to_member_type_info* thrown_catch_type =
+    if (member_ptr_type) {
+        const __pointer_to_member_type_info* thrown_member_ptr_type =
         dynamic_cast<const __pointer_to_member_type_info*>(thrown_pointer_type->__pointee);
-        if (thrown_catch_type == 0)
+        if (thrown_member_ptr_type == 0)
             return false;
-        if (~member_catch_type->__flags & thrown_catch_type->__flags)
+        if (~member_ptr_type->__flags & thrown_member_ptr_type->__flags)
             return false;
-        if (member_catch_type->can_catch(thrown_catch_type, adjustedPtr))
-          return true;
-        if (is_equal(member_catch_type->__context, thrown_catch_type->__context, false)) {
-          if (adjustedPtr != NULL)
-                adjustedPtr = *static_cast<void**>(adjustedPtr);
-            return true;
-        }
-        return false;
+        if (!member_ptr_type->can_catch(thrown_member_ptr_type, adjustedPtr))
+            return false;
+        //if (!is_equal(member_ptr_type->__context, thrown_member_ptr_type->__context, false))
+        //    return false;
+        if (adjustedPtr != NULL)
+            adjustedPtr = *static_cast<void**>(adjustedPtr);
+        return true;
     }
 
     // Handle pointer to class type

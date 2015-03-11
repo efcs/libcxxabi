@@ -1,18 +1,29 @@
+#include <cassert>
+
 struct S {};
 
 int main() {
+  
   try {
     throw(int**)nullptr;
   } catch (const int*const*) {
   } catch (...) {
-    return 42;
+    assert(false);
   }
 
   try {
     throw (int S::**)nullptr;
   } catch (const int S::*const*) {
   } catch (...) {
-    return 42;
+    assert(false);
+  }
+  
+  try {
+   throw (float S::**)nullptr;
+  } catch (int S::**) {
+    assert(false);
+  } catch (...) {
+      
   }
 
   return 0;
