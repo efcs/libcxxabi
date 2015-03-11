@@ -61,6 +61,8 @@ class Configuration(LibcxxConfiguration):
         pass
 
     def configure_link_flags_abi_library_path(self):
+        cxx_path = '/usr/local/google/home/ericwf/workspace/build-libcxx/lib'
+        self.cxx.link_flags += ['-L' + cxx_path, '-Wl,-rpath,' + cxx_path]
         # Configure ABI library paths.
         if self.libcxxabi_lib_root:
             self.cxx.link_flags += ['-L' + self.libcxxabi_lib_root,
