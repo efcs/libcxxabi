@@ -418,11 +418,11 @@ __pointer_type_info::can_catch(const __shim_type_info* thrown_type,
 
     // Handle pointer to class type
     const __class_type_info* catch_class_type =
-          dynamic_cast<const __class_type_info*>(__pointee);
+        dynamic_cast<const __class_type_info*>(__pointee);
     if (catch_class_type == 0)
         return false;
     const __class_type_info* thrown_class_type =
-          dynamic_cast<const __class_type_info*>(thrown_pointer_type->__pointee);
+        dynamic_cast<const __class_type_info*>(thrown_pointer_type->__pointee);
     if (thrown_class_type == 0)
         return false;
     __dynamic_cast_info info = {thrown_class_type, 0, catch_class_type, -1, 0};
