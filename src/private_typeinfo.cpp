@@ -391,12 +391,20 @@ __pointer_type_info::can_catch(const __shim_type_info* thrown_type,
     if (is_equal(__pointee, &typeid(void), false))
         return true;
 
+    // Handle pointer to pointer
+    const __pointer_type_info* nested_pointer_type =
+        dynamic_cast<const __pointer_type_info*>(__pointee);
+    if (nested_pointer_type) {
+        return nested_pointer_type->can_catch(thrown_pointer_type->__pointee, adjustedPtr);
+    }
+
+    // Handle pointer to pointer to member
     const __pointer_to_member_type_info* member_catch_type =
         dynamic_cast<const __pointer_to_member_type_info*>(__pointee);
     if (member_catch_type) {
         const __pointer_to_member_type_info* thrown_catch_type =
         dynamic_cast<const __pointer_to_member_type_info*>(thrown_pointer_type->__pointee);
-        if (! thrown_catch_type)
+        if (thrown_catch_type == 0)
             return false;
         if (~member_catch_type->__flags & thrown_catch_type->__flags)
             return false;
@@ -409,6 +417,8 @@ __pointer_type_info::can_catch(const __shim_type_info* thrown_type,
         }
         return false;
     }
+
+    // Handle pointer to class type
     const __class_type_info* catch_class_type =
           dynamic_cast<const __class_type_info*>(__pointee);
     if (catch_class_type == 0)
