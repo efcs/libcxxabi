@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "private_typeinfo.h"
+#include <assert.h>
 
 // The flag _LIBCXX_DYNAMIC_FALLBACK is used to make dynamic_cast more
 // forgiving when type_info's mistakenly have hidden visibility and thus
@@ -389,12 +390,31 @@ __pointer_type_info::can_catch(const __shim_type_info* thrown_type,
     // bullet 3A
     if (is_equal(__pointee, &typeid(void), false))
         return true;
+
+    const __pointer_to_member_type_info* member_catch_type =
+        dynamic_cast<const __pointer_to_member_type_info*>(__pointee);
+    if (member_catch_type) {
+        const __pointer_to_member_type_info* thrown_catch_type =
+        dynamic_cast<const __pointer_to_member_type_info*>(thrown_pointer_type->__pointee);
+        if (! thrown_catch_type)
+            return false;
+        if (~member_catch_type->__flags & thrown_catch_type->__flags)
+            return false;
+        if (member_catch_type->can_catch(thrown_catch_type, adjustedPtr))
+          return true;
+        if (is_equal(member_catch_type->__context, thrown_catch_type->__context, false)) {
+          if (adjustedPtr != NULL)
+                adjustedPtr = *static_cast<void**>(adjustedPtr);
+            return true;
+        }
+        return false;
+    }
     const __class_type_info* catch_class_type =
-        dynamic_cast<const __class_type_info*>(__pointee);
+          dynamic_cast<const __class_type_info*>(__pointee);
     if (catch_class_type == 0)
         return false;
     const __class_type_info* thrown_class_type =
-        dynamic_cast<const __class_type_info*>(thrown_pointer_type->__pointee);
+          dynamic_cast<const __class_type_info*>(thrown_pointer_type->__pointee);
     if (thrown_class_type == 0)
         return false;
     __dynamic_cast_info info = {thrown_class_type, 0, catch_class_type, -1, 0};
