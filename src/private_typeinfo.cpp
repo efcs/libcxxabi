@@ -8,7 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "private_typeinfo.h"
-#include <assert.h>
 
 // The flag _LIBCXX_DYNAMIC_FALLBACK is used to make dynamic_cast more
 // forgiving when type_info's mistakenly have hidden visibility and thus
