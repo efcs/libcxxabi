@@ -8,6 +8,11 @@
 //===----------------------------------------------------------------------===//
 
 #include <cassert>
+#include <cstdlib>
+
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
 
 #if __has_feature(cxx_nullptr)
 
