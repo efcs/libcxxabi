@@ -78,8 +78,8 @@ void catch_test() {
 int main()
 {
 // catch naked nullptrs
-    //test1();
-    //test2();
+    test1();
+    test2();
 
    catch_test<int **, int **>();                       // pointer to pointer to int
 
