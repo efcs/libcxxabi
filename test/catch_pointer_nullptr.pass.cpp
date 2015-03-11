@@ -62,6 +62,9 @@ void test2()
 
 #endif
 
+template <class T>
+void test_conversion(T) {}
+
 template <typename T, typename C>
 void catch_test() {
 #if __has_feature(cxx_nullptr)
@@ -69,6 +72,8 @@ void catch_test() {
    catch (C) {}
    catch (...) { assert(false); }
 #endif
+
+   test_conversion<C>((T)0);
 
    try { throw (T) NULL; assert(false); }
    catch (C) {}
@@ -86,18 +91,18 @@ int main()
    catch_test<int **, int * const *>();                // pointer to const pointer to int
    catch_test<int **, int ** const>();                 // const pointer to pointer to int
    catch_test<int **, int * const * const>();          // const pointer to const pointer to int
-   catch_test<int **, const int **>();                 // pointer to pointer to const int
+   //catch_test<int **, const int **>();                 // pointer to pointer to const int
    catch_test<int **, const int * const *>();          // pointer to const pointer to const int
-   catch_test<int **, const int ** const>();           // const pointer to pointer to const int
+   //catch_test<int **, const int ** const>();           // const pointer to pointer to const int
    catch_test<int **, const int * const * const>();    // const pointer to const pointer to const int
 
    catch_test<int **, int * volatile *>();                     // pointer to volatile pointer to int
    catch_test<int **, int ** volatile>();                      // volatile pointer to pointer to int
    catch_test<int **, int * volatile * volatile>();            // volatile pointer to volatile pointer to int
-   catch_test<int **, volatile int **>();                      // pointer to pointer to volatile int
-   catch_test<int **, volatile int * volatile *>();            // pointer to volatile pointer to volatile int
-   catch_test<int **, volatile int ** volatile>();             // volatile pointer to pointer to volatile int
-   catch_test<int **, volatile int * volatile * volatile>();   // volatile pointer to volatile pointer to volatile int
+   //catch_test<int **, volatile int **>();                      // pointer to pointer to volatile int
+   //catch_test<int **, volatile int * volatile *>();            // pointer to volatile pointer to volatile int
+   //catch_test<int **, volatile int ** volatile>();             // volatile pointer to pointer to volatile int
+   //catch_test<int **, volatile int * volatile * volatile>();   // volatile pointer to volatile pointer to volatile int
 
 
 // Member functions
@@ -119,6 +124,6 @@ int main()
    catch_test<int A::**, int A::* const* const>();
     
     catch_test<int A::**, const int A::* const *>();
-    catch_test<int A::**, const int A::** const>();
+    //catch_test<int A::**, const int A::** const>();
     catch_test<int A::**, const int A::* const* const>();
 }
