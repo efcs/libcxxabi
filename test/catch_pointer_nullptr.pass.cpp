@@ -109,7 +109,7 @@ int main()
    catch_test<int A::*, int A::*>();
    //catch_test<int A::*, int A::* const>();
    //catch_test<int A::*, int A::* volatile>();
-   
+
    //catch_test<int A::*, const int A::*>();
    catch_test<int A::*, const int A::* const>();
    catch_test<int A::*, const int A::* volatile>();
@@ -117,14 +117,14 @@ int main()
    catch_test<int A::*, volatile int A::* volatile>();
    catch_test<int A::*, volatile int A::* const>();
 
-/*
+
    catch_test<int A::**, int A::**>();
    catch_test<int A::**, int A::* const *>();
    catch_test<int A::**, int A::** const>();
    catch_test<int A::**, int A::* const* const>();
-    
+
     catch_test<int A::**, const int A::* const *>();
     //catch_test<int A::**, const int A::** const>();
     catch_test<int A::**, const int A::* const* const>();
-    */
+
 }
