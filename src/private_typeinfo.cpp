@@ -413,8 +413,6 @@ __pointer_type_info::can_catch(const __shim_type_info* thrown_type,
            return false;
         if (!is_equal(member_ptr_type->__pointee, thrown_member_ptr_type->__pointee, false))
             return false;
-        if (adjustedPtr != NULL)
-            adjustedPtr = *static_cast<void**>(adjustedPtr);
        return true;
     }
 
