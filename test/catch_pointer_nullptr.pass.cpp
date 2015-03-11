@@ -100,9 +100,9 @@ int main()
    catch_test<int **, int ** volatile>();                      // volatile pointer to pointer to int
    catch_test<int **, int * volatile * volatile>();            // volatile pointer to volatile pointer to int
    //catch_test<int **, volatile int **>();                      // pointer to pointer to volatile int
-   catch_test<int **, volatile int * volatile *>();            // pointer to volatile pointer to volatile int
+   //catch_test<int **, volatile int * volatile *>();            // pointer to volatile pointer to volatile int
    //catch_test<int **, volatile int ** volatile>();             // volatile pointer to pointer to volatile int
-   catch_test<int **, volatile int * volatile * volatile>();   // volatile pointer to volatile pointer to volatile int
+   //catch_test<int **, volatile int * volatile * volatile>();   // volatile pointer to volatile pointer to volatile int
 
 
 // Member functions
