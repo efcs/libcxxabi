@@ -501,9 +501,9 @@ bool __pointer_to_member_type_info::can_catch_nested(
         return false;
     if (!is_equal(__pointee, thrown_member_ptr_type->__pointee, false))
         return false;
-    if (is_equal(__context, thrown_member_ptr_type->__context, false))
-        return true;
-    return false;
+    if (!is_equal(__context, thrown_member_ptr_type->__context, false))
+        return false;
+    return true;
 }
 
 #ifdef __clang__
