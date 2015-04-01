@@ -192,6 +192,11 @@ struct generate_tests {
       typedef typename Types::VType VType;
       typedef typename Types::CVType CVType;
 
+      catch_pointer_test<ThrowTp, Type>();
+      catch_pointer_test<ThrowTp, CType>();
+      catch_pointer_test<ThrowTp, VType>();
+      catch_pointer_test<ThrowTp, CVType>();
+
       generate_tests<ThrowTp, Type, level-1>()();
       generate_tests<ThrowTp, CType, level-1>()();
       generate_tests<ThrowTp, VType, level-1>()();
@@ -213,18 +218,9 @@ int main()
   test1();
   test2();
 
-  generate_tests<int, int, 1>()();
-  generate_tests<int, int, 2>()();
   generate_tests<int, int, 3>()();
-
-  generate_tests<Base, Derived, 1>()();
   generate_tests<Base, Derived, 2>()();
-
-  generate_tests<int A::*, int A::*, 1>()();
-  generate_tests<int A::*, int A::*, 2>()();
   generate_tests<int A::*, int A::*, 3>()();
-
-  generate_tests<int Base::*, int Derived::*, 1>()();
   generate_tests<int Base::*, int Derived::*, 2>()();
 
 
