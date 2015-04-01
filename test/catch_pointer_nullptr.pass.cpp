@@ -98,14 +98,34 @@ void catch_nullptr_test() {
 #endif
 }
 
+
+template <class Pointer>
+struct CreatePointer {
+  Pointer operator()() const {
+      return (Pointer)0;
+  }
+};
+
+
+template <class Tp>
+struct CreatePointer<Tp*> {
+  Tp* operator()() const {
+      return (Tp*)42;
+  }
+};
+
 template <class Throw, class Catch>
 void catch_pointer_test() {
-  const bool can_convert = test_conversion<Catch>(Throw(NULL));
+  Throw throw_ptr = CreatePointer<Throw>()();
+  const bool can_convert = test_conversion<Catch>(throw_ptr);
   try {
-    throw (Throw) NULL;
+    throw throw_ptr;
     assert(false);
-  } catch (Catch) {
+  } catch (Catch catch_ptr) {
+    Catch catch2 = CreatePointer<Catch>()();
     my_assert(can_convert, "non-convertible type incorrectly caught");
+    my_assert(catch_ptr == catch2,
+              "Thrown pointer does not match caught ptr");
   } catch (...) {
     my_assert(!can_convert, "convertible type incorrectly not caught");
   }
