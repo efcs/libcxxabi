@@ -395,7 +395,7 @@ __pointer_type_info::can_catch(const __shim_type_info* thrown_type,
         dynamic_cast<const __pointer_type_info*>(__pointee);
     if (nested_pointer_type) {
         if (~__flags & __const_mask) return false;
-        return nested_pointer_type->can_catch_nested(thrown_pointer_type->__pointee, adjustedPtr);
+        return nested_pointer_type->can_catch_nested(thrown_pointer_type->__pointee);
     }
 
     // Handle pointer to pointer to member
@@ -403,7 +403,7 @@ __pointer_type_info::can_catch(const __shim_type_info* thrown_type,
         dynamic_cast<const __pointer_to_member_type_info*>(__pointee);
     if (member_ptr_type) {
         if (~__flags & __const_mask) return false;
-        return member_ptr_type->can_catch_nested(thrown_pointer_type->__pointee, adjustedPtr);
+        return member_ptr_type->can_catch_nested(thrown_pointer_type->__pointee);
     }
 
     // Handle pointer to class type
@@ -428,7 +428,7 @@ __pointer_type_info::can_catch(const __shim_type_info* thrown_type,
 }
 
 bool __pointer_type_info::can_catch_nested(
-    const __shim_type_info* thrown_type, void*& adjustedPtr) const
+    const __shim_type_info* thrown_type) const
 {
   const __pointer_type_info* thrown_pointer_type =
         dynamic_cast<const __pointer_type_info*>(thrown_type);
@@ -448,7 +448,7 @@ bool __pointer_type_info::can_catch_nested(
         dynamic_cast<const __pointer_type_info*>(__pointee);
     if (nested_pointer_type) {
         return nested_pointer_type->can_catch_nested(
-            thrown_pointer_type->__pointee, adjustedPtr);
+            thrown_pointer_type->__pointee);
     }
 
     // Handle pointer to pointer to member
@@ -456,7 +456,7 @@ bool __pointer_type_info::can_catch_nested(
         dynamic_cast<const __pointer_to_member_type_info*>(__pointee);
     if (member_ptr_type) {
         if (~__flags & __const_mask) return false;
-        return member_ptr_type->can_catch_nested(thrown_pointer_type->__pointee, adjustedPtr);
+        return member_ptr_type->can_catch_nested(thrown_pointer_type->__pointee);
     }
     return false;
 }
@@ -491,7 +491,7 @@ bool __pointer_to_member_type_info::can_catch(
 }
 
 bool __pointer_to_member_type_info::can_catch_nested(
-    const __shim_type_info* thrown_type, void*&) const
+    const __shim_type_info* thrown_type) const
 {
     const __pointer_to_member_type_info* thrown_member_ptr_type =
         dynamic_cast<const __pointer_to_member_type_info*>(thrown_type);
