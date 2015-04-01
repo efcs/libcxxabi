@@ -478,7 +478,7 @@ bool __pointer_to_member_type_info::can_catch(
     if (!is_equal(__context, thrown_pointer_type->__context, false)) {
       //__dynamic_cast_info info = {thrown_class_type, 0, catch_class_type, -1, 0};
       __dynamic_cast_info info = {__context, 0, thrown_pointer_type->__context, -1, 0};
-      info.number_of_dst_type = 0;
+      info.number_of_dst_type = 1;
       __context->has_unambiguous_public_base(&info, adjustedPtr, public_path);
       if (info.path_dst_ptr_to_static_ptr != public_path){
         return false;
