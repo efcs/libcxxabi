@@ -11,13 +11,11 @@
 #include <cstdlib>
 #include <iostream>
 
-bool should_abort = false;
-
 void do_assert(bool assert_passed, const char* msg, int line, const char* func) {
   if (assert_passed) return;
   std::cerr << __FILE__ << ":" << line << " " << func
             << ": Assertion Failed `" << msg << "'\n\n";
-  should_abort = true;
+  std::abort();
 }
 
 #define my_assert(pred, msg) do_assert(pred, msg, __LINE__, __PRETTY_FUNCTION__)
@@ -26,10 +24,11 @@ void do_assert(bool assert_passed, const char* msg, int line, const char* func) 
 #define __has_feature(x) 0
 #endif
 
-#if __has_feature(cxx_nullptr)
-
+struct A {};
 struct Base {};
 struct Derived : public Base {};
+
+#if __has_feature(cxx_nullptr)
 
 void test1()
 {
@@ -114,8 +113,11 @@ struct CreatePointer<Tp*> {
   }
 };
 
+std::size_t test_count = 0;
+
 template <class Throw, class Catch>
 void catch_pointer_test() {
+  ++test_count;
   Throw throw_ptr = CreatePointer<Throw>()();
   const bool can_convert = test_conversion<Catch>(throw_ptr);
   try {
@@ -137,7 +139,7 @@ void catch_test() {
   catch_pointer_test<Throw, Catch>();
 }
 
-template <class Tp>
+template <class Tp, bool First = false>
 struct TestTypes {
   typedef Tp* Type;
   typedef Tp const* CType;
@@ -146,22 +148,22 @@ struct TestTypes {
 };
 
 template <class Member, class Class>
-struct TestTypes<Member Class::*> {
+struct TestTypes<Member Class::*, true> {
   typedef Member (Class::*Type);
   typedef const Member (Class::*CType);
   typedef volatile Member (Class::*VType);
   typedef const volatile Member (Class::*CVType);
 };
 
-
-template <class Throw, class Catch, int level>
-struct generate_tests {
+template <class Throw, class Catch, int level, bool first = false>
+struct generate_tests_imp {
+  typedef TestTypes<Throw, first> ThrowTypes;
+  typedef TestTypes<Catch, first> CatchTypes;
   void operator()() {
-      typedef TestTypes<Throw> Types;
-      typedef typename Types::Type Type;
-      typedef typename Types::CType CType;
-      typedef typename Types::VType VType;
-      typedef typename Types::CVType CVType;
+      typedef typename ThrowTypes::Type Type;
+      typedef typename ThrowTypes::CType CType;
+      typedef typename ThrowTypes::VType VType;
+      typedef typename ThrowTypes::CVType CVType;
 
       run_nullptr_tests();
 
@@ -172,11 +174,10 @@ struct generate_tests {
   }
   
   void run_nullptr_tests() {
-      typedef TestTypes<Catch> Types;
-      typedef typename Types::Type Type;
-      typedef typename Types::CType CType;
-      typedef typename Types::VType VType;
-      typedef typename Types::CVType CVType;
+      typedef typename CatchTypes::Type Type;
+      typedef typename CatchTypes::CType CType;
+      typedef typename CatchTypes::VType VType;
+      typedef typename CatchTypes::CVType CVType;
 
       catch_nullptr_test<Type>();
       catch_nullptr_test<CType>();
@@ -186,31 +187,33 @@ struct generate_tests {
 
   template <class ThrowTp>
   void run_catch_tests() {
-      typedef TestTypes<Catch> Types;
-      typedef typename Types::Type Type;
-      typedef typename Types::CType CType;
-      typedef typename Types::VType VType;
-      typedef typename Types::CVType CVType;
+      typedef typename CatchTypes::Type Type;
+      typedef typename CatchTypes::CType CType;
+      typedef typename CatchTypes::VType VType;
+      typedef typename CatchTypes::CVType CVType;
 
       catch_pointer_test<ThrowTp, Type>();
       catch_pointer_test<ThrowTp, CType>();
       catch_pointer_test<ThrowTp, VType>();
       catch_pointer_test<ThrowTp, CVType>();
 
-      generate_tests<ThrowTp, Type, level-1>()();
-      generate_tests<ThrowTp, CType, level-1>()();
-      generate_tests<ThrowTp, VType, level-1>()();
-      generate_tests<ThrowTp, CVType, level-1>()();
+      generate_tests_imp<ThrowTp, Type, level-1>()();
+      generate_tests_imp<ThrowTp, CType, level-1>()();
+      generate_tests_imp<ThrowTp, VType, level-1>()();
+      generate_tests_imp<ThrowTp, CVType, level-1>()();
   }
 };
 
-template <class Throw, class Catch>
-struct generate_tests<Throw, Catch, 0> {
+
+template <class Throw, class Catch, bool first>
+struct generate_tests_imp<Throw, Catch, 0, first> {
   void operator()() {
       catch_pointer_test<Throw, Catch>();
   }
 };
 
+template <class Throw, class Catch, int level>
+struct generate_tests : generate_tests_imp<Throw, Catch, level, true> {};
 
 int main()
 {
@@ -221,13 +224,11 @@ int main()
   generate_tests<int, int, 3>()();
   generate_tests<Base, Derived, 2>()();
   generate_tests<Derived, Base, 2>()();
+  generate_tests<int, void, 2>()();
+  generate_tests<void, int, 2>()();
 
   generate_tests<int A::*, int A::*, 3>()();
+  generate_tests<int A::*, void, 2>()();
   generate_tests<int Base::*, int Derived::*, 2>()();
   generate_tests<int Derived::*, int Base::*, 2>()();
-
-  if (should_abort) {
-    std::cerr << "Aborting..." << std::endl;
-    std::abort();
-  }
 }

@@ -442,9 +442,6 @@ bool __pointer_type_info::can_catch_nested(
     // If the pointed to types differ then the catch type must be cv qualified.
     if (~__flags & __const_mask)
         return false;
-    // bullet 3A
-    if (is_equal(__pointee, &typeid(void), false))
-        return true;
 
     // Handle pointer to pointer
     const __pointer_type_info* nested_pointer_type =
@@ -452,6 +449,14 @@ bool __pointer_type_info::can_catch_nested(
     if (nested_pointer_type) {
         return nested_pointer_type->can_catch_nested(
             thrown_pointer_type->__pointee, adjustedPtr);
+    }
+
+    // Handle pointer to pointer to member
+    const __pointer_to_member_type_info* member_ptr_type =
+        dynamic_cast<const __pointer_to_member_type_info*>(__pointee);
+    if (member_ptr_type) {
+        if (~__flags & __const_mask) return false;
+        return member_ptr_type->can_catch_nested(thrown_pointer_type->__pointee, adjustedPtr);
     }
     return false;
 }
@@ -486,7 +491,7 @@ bool __pointer_to_member_type_info::can_catch(
 }
 
 bool __pointer_to_member_type_info::can_catch_nested(
-    const __shim_type_info* thrown_type, void*& adjustedPtr) const
+    const __shim_type_info* thrown_type, void*&) const
 {
     const __pointer_to_member_type_info* thrown_member_ptr_type =
         dynamic_cast<const __pointer_to_member_type_info*>(thrown_type);
@@ -494,13 +499,7 @@ bool __pointer_to_member_type_info::can_catch_nested(
         return false;
     if (~__flags & thrown_member_ptr_type->__flags)
         return false;
-    if (~__flags & __const_mask)
-        return false;
-    if (can_catch(thrown_member_ptr_type, adjustedPtr))
-        return true;
     if (!is_equal(__pointee, thrown_member_ptr_type->__pointee, false))
-        return false;
-    if (!is_equal(this, thrown_member_ptr_type, false))
         return false;
     if (is_equal(__context, thrown_member_ptr_type->__context, false))
         return true;
