@@ -439,7 +439,8 @@ bool __pointer_type_info::can_catch_nested(
         return false;
     if (is_equal(__pointee, thrown_pointer_type->__pointee, false))
         return true;
-    // If the pointed to types differ then the catch type must be cv qualified.
+    // If the pointed to types differ then the catch type must be const
+    // qualified.
     if (~__flags & __const_mask)
         return false;
 
@@ -457,35 +458,33 @@ bool __pointer_type_info::can_catch_nested(
     if (member_ptr_type) {
         return member_ptr_type->can_catch_nested(thrown_pointer_type->__pointee);
     }
+
     return false;
 }
 
 bool __pointer_to_member_type_info::can_catch(
     const __shim_type_info* thrown_type, void*& adjustedPtr) const {
     // bullets 1 and 4
-    if (__pbase_type_info::can_catch(thrown_type, adjustedPtr)) {
+    if (__pbase_type_info::can_catch(thrown_type, adjustedPtr))
         return true;
-    }
-    // bullet 3
+
     const __pointer_to_member_type_info* thrown_pointer_type =
         dynamic_cast<const __pointer_to_member_type_info*>(thrown_type);
     if (thrown_pointer_type == 0)
         return false;
-    // bullet 3B
     if (thrown_pointer_type->__flags & ~__flags)
         return false;
-
-    if (!is_equal(__context, thrown_pointer_type->__context, false)) {
-      //__dynamic_cast_info info = {thrown_class_type, 0, catch_class_type, -1, 0};
-      __dynamic_cast_info info = {__context, 0, thrown_pointer_type->__context, -1, 0};
-      info.number_of_dst_type = 1;
-      __context->has_unambiguous_public_base(&info, adjustedPtr, public_path);
-      if (info.path_dst_ptr_to_static_ptr != public_path){
+    if (!is_equal(__pointee, thrown_pointer_type->__pointee, false))
         return false;
-      }
-    }
-    if (is_equal(__pointee, thrown_pointer_type->__pointee, false))
+    if (is_equal(__context, thrown_pointer_type->__context, false))
         return true;
+
+    __dynamic_cast_info info = {__context, 0, thrown_pointer_type->__context, -1, 0};
+    info.number_of_dst_type = 1;
+    __context->has_unambiguous_public_base(&info, adjustedPtr, public_path);
+    if (info.path_dst_ptr_to_static_ptr == public_path)
+        return true;
+
     return false;
 }
 
