@@ -434,9 +434,6 @@ bool __pointer_type_info::can_catch_nested(
         dynamic_cast<const __pointer_type_info*>(thrown_type);
     if (thrown_pointer_type == 0)
         return false;
-    // Do the dereference adjustment
-    if (adjustedPtr != NULL)
-        adjustedPtr = *static_cast<void**>(adjustedPtr);
     // bullet 3B
     if (thrown_pointer_type->__flags & ~__flags)
         return false;

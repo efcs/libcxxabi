@@ -213,15 +213,16 @@ int main()
   test1();
   test2();
 
-  //generate_tests<int, int, 1>()();
+  generate_tests<int, int, 1>()();
   generate_tests<int, int, 2>()();
-  //generate_tests<int, int, 3>()();
+  generate_tests<int, int, 3>()();
 
   generate_tests<Base, Derived, 1>()();
   generate_tests<Base, Derived, 2>()();
 
   generate_tests<int A::*, int A::*, 1>()();
   generate_tests<int A::*, int A::*, 2>()();
+  generate_tests<int A::*, int A::*, 3>()();
 
   generate_tests<int Base::*, int Derived::*, 1>()();
   generate_tests<int Base::*, int Derived::*, 2>()();
