@@ -455,7 +455,6 @@ bool __pointer_type_info::can_catch_nested(
     const __pointer_to_member_type_info* member_ptr_type =
         dynamic_cast<const __pointer_to_member_type_info*>(__pointee);
     if (member_ptr_type) {
-        if (~__flags & __const_mask) return false;
         return member_ptr_type->can_catch_nested(thrown_pointer_type->__pointee);
     }
     return false;
