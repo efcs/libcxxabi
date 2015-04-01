@@ -9,6 +9,18 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <iostream>
+
+bool should_abort = false;
+
+void do_assert(bool assert_passed, const char* msg, int line, const char* func) {
+  if (assert_passed) return;
+  std::cerr << __FILE__ << ":" << line << " " << func
+            << ": Assertion Failed `" << msg << "'\n\n";
+  should_abort = true;
+}
+
+#define my_assert(pred, msg) do_assert(pred, msg, __LINE__, __PRETTY_FUNCTION__)
 
 #ifndef __has_feature
 #define __has_feature(x) 0
@@ -71,88 +83,131 @@ bool test_conversion(To) { return true; }
 template <class To>
 bool test_conversion(...) { return false; }
 
-template <class Throw, class Catch>
-void catch_test() {
+template <class Catch>
+void catch_nullptr_test() {
 #if __has_feature(cxx_nullptr)
-  {
-    const bool can_convert = test_conversion<Catch>(nullptr);
-    try {
-      throw nullptr;
-      assert(false);
-    } catch (Catch) {
-      assert(can_convert && "non-convertible type incorrectly caught");
-    } catch (...) {
-      assert(!can_convert && "convertible type incorrectly not caught");
-    }
+  const bool can_convert = test_conversion<Catch>(nullptr);
+  try {
+    throw nullptr;
+    assert(false);
+  } catch (Catch) {
+    my_assert(can_convert, "non-convertible type incorrectly caught");
+  } catch (...) {
+    my_assert(can_convert, "convertible type incorrectly not caught");
   }
 #endif
-  {
-    const bool can_convert = test_conversion<Catch>(Throw(NULL));
-    try {
-      throw (Throw) NULL;
-      assert(false);
-    } catch (Catch) {
-      assert(can_convert && "non-convertible type incorrectly caught");
-    } catch (...) {
-      assert(!can_convert  && "convertible type incorrectly not caught");
-    }
+}
+
+template <class Throw, class Catch>
+void catch_pointer_test() {
+  const bool can_convert = test_conversion<Catch>(Throw(NULL));
+  try {
+    throw (Throw) NULL;
+    assert(false);
+  } catch (Catch) {
+    my_assert(can_convert, "non-convertible type incorrectly caught");
+  } catch (...) {
+    my_assert(!can_convert, "convertible type incorrectly not caught");
   }
 }
+
+template <class Throw, class Catch>
+void catch_test() {
+  catch_nullptr_test<Catch>();
+  catch_pointer_test<Throw, Catch>();
+}
+
+template <class Tp>
+struct TestTypes {
+  typedef Tp* Type;
+  typedef Tp const* CType;
+  typedef Tp volatile* VType;
+  typedef Tp const volatile* CVType;
+};
+
+template <class Member, class Class>
+struct TestTypes<Member Class::*> {
+  typedef Member (Class::*Type);
+  typedef const Member (Class::*CType);
+  typedef volatile Member (Class::*VType);
+  typedef const volatile Member (Class::*CVType);
+};
+
+
+template <class Throw, class Catch, int level>
+struct generate_tests {
+  void operator()() {
+      typedef TestTypes<Throw> Types;
+      typedef typename Types::Type Type;
+      typedef typename Types::CType CType;
+      typedef typename Types::VType VType;
+      typedef typename Types::CVType CVType;
+
+      run_nullptr_tests();
+
+      run_catch_tests<Type>();
+      run_catch_tests<CType>();
+      run_catch_tests<VType>();
+      run_catch_tests<CVType>();
+  }
+  
+  void run_nullptr_tests() {
+      typedef TestTypes<Catch> Types;
+      typedef typename Types::Type Type;
+      typedef typename Types::CType CType;
+      typedef typename Types::VType VType;
+      typedef typename Types::CVType CVType;
+
+      catch_nullptr_test<Type>();
+      catch_nullptr_test<CType>();
+      catch_nullptr_test<VType>();
+      catch_nullptr_test<CVType>();
+  }
+
+  template <class ThrowTp>
+  void run_catch_tests() {
+      typedef TestTypes<Catch> Types;
+      typedef typename Types::Type Type;
+      typedef typename Types::CType CType;
+      typedef typename Types::VType VType;
+      typedef typename Types::CVType CVType;
+
+      generate_tests<ThrowTp, Type, level-1>()();
+      generate_tests<ThrowTp, CType, level-1>()();
+      generate_tests<ThrowTp, VType, level-1>()();
+      generate_tests<ThrowTp, CVType, level-1>()();
+  }
+};
+
+template <class Throw, class Catch>
+struct generate_tests<Throw, Catch, 0> {
+  void operator()() {
+      catch_pointer_test<Throw, Catch>();
+  }
+};
+
+
 int main()
 {
   // catch naked nullptrs
   test1();
   test2();
 
-  catch_test<int **, int **>();                       // pointer to pointer to int
+  //generate_tests<int, int, 1>()();
+  generate_tests<int, int, 2>()();
+  //generate_tests<int, int, 3>()();
 
-  catch_test<int **, int * const *>();                // pointer to const pointer to int
-  catch_test<int **, int ** const>();                 // const pointer to pointer to int
-  catch_test<int **, int * const * const>();          // const pointer to const pointer to int
-  catch_test<int **, const int **>();                 // pointer to pointer to const int
-  catch_test<int **, const int * const *>();          // pointer to const pointer to const int
-  catch_test<int **, const int ** const>();           // const pointer to pointer to const int
-  catch_test<int **, const int * const * const>();    // const pointer to const pointer to const int
+  generate_tests<Base, Derived, 1>()();
+  generate_tests<Base, Derived, 2>()();
 
-  catch_test<int **, int * volatile *>();                     // pointer to volatile pointer to int
-  catch_test<int **, int ** volatile>();                      // volatile pointer to pointer to int
-  catch_test<int **, int * volatile * volatile>();            // volatile pointer to volatile pointer to int
-  catch_test<int **, volatile int **>();                      // pointer to pointer to volatile int
-  catch_test<int **, volatile int * volatile *>();            // pointer to volatile pointer to volatile int
-  catch_test<int **, volatile int ** volatile>();             // volatile pointer to pointer to volatile int
-  catch_test<int **, volatile int * volatile * volatile>();   // volatile pointer to volatile pointer to volatile int
+  generate_tests<int A::*, int A::*, 1>()();
+  generate_tests<int A::*, int A::*, 2>()();
 
-  catch_test<int ***, int***>();
-  catch_test<int ***, int const***>();
-  catch_test<int ***, int const* const**>();
-  catch_test<int ***, int const* const* const*>();
-
-  catch_test<int ***, long***>();
-  
-  // Member functions
-  catch_test<int A::*, int A::*>();
-  catch_test<int A::*, int A::* const>();
-  catch_test<int A::*, int A::* volatile>();
-
-  catch_test<int A::*, const int A::*>();
-  catch_test<int A::*, const int A::* const>();
-  catch_test<int A::*, const int A::* volatile>();
-  catch_test<int A::*, volatile int A::*>();
-  catch_test<int A::*, volatile int A::* volatile>();
-  catch_test<int A::*, volatile int A::* const>();
+  generate_tests<int Base::*, int Derived::*, 1>()();
+  generate_tests<int Base::*, int Derived::*, 2>()();
 
 
-  catch_test<int A::**, int A::**>();
-  catch_test<int A::**, int A::* const *>();
-  catch_test<int A::**, int A::** const>();
-  catch_test<int A::**, int A::* const* const>();
-
-  catch_test<int A::**, const int A::* const *>();
-  catch_test<int A::**, const int A::** const>();
-  catch_test<int A::**, const int A::* const* const>();
-  
-  assert(test_conversion<int Derived::*>((int Base::*)NULL));
-  catch_test<int Base::*, int Derived::*>();
-  catch_test<int Derived::*, int Base::*>();
-
+  if (should_abort) {
+    std::abort();
+  }
 }

@@ -440,10 +440,11 @@ bool __pointer_type_info::can_catch_nested(
     // bullet 3B
     if (thrown_pointer_type->__flags & ~__flags)
         return false;
-    if (~__flags & __const_mask)
-        return false;
     if (is_equal(__pointee, thrown_pointer_type->__pointee, false))
         return true;
+    // If the pointed to types differ then the catch type must be cv qualified.
+    if (~__flags & __const_mask)
+        return false;
     // bullet 3A
     if (is_equal(__pointee, &typeid(void), false))
         return true;
@@ -472,10 +473,17 @@ bool __pointer_to_member_type_info::can_catch(
     // bullet 3B
     if (thrown_pointer_type->__flags & ~__flags)
         return false;
+
+    if (!is_equal(__context, thrown_pointer_type->__context, false)) {
+      //__dynamic_cast_info info = {thrown_class_type, 0, catch_class_type, -1, 0};
+      __dynamic_cast_info info = {__context, 0, thrown_pointer_type->__context, -1, 0};
+      info.number_of_dst_type = 0;
+      __context->has_unambiguous_public_base(&info, adjustedPtr, public_path);
+      if (info.path_dst_ptr_to_static_ptr != public_path){
+        return false;
+      }
+    }
     if (is_equal(__pointee, thrown_pointer_type->__pointee, false))
-        return true;
-    // bullet 3A
-    if (is_equal(__pointee, &typeid(void), false))
         return true;
     return false;
 }
@@ -499,25 +507,6 @@ bool __pointer_to_member_type_info::can_catch_nested(
         return false;
     if (is_equal(__context, thrown_member_ptr_type->__context, false))
         return true;
-
-    const __class_type_info* catch_class_type =
-        dynamic_cast<const __class_type_info*>(__context);
-    if (catch_class_type == 0)
-        return false;
-
-    const __class_type_info* thrown_class_type =
-        dynamic_cast<const __class_type_info*>(thrown_member_ptr_type->__context);
-    if (thrown_class_type == 0)
-        return false;
-
-    //__dynamic_cast_info info = {thrown_class_type, 0, catch_class_type, -1, 0};
-    __dynamic_cast_info info = {catch_class_type, 0, thrown_class_type, -1, 0};
-    info.number_of_dst_type = 0;
-    thrown_class_type->has_unambiguous_public_base(&info, adjustedPtr, public_path);
-    if (info.path_dynamic_ptr_to_static_ptr == public_path)
-    {
-        return true;
-    }
     return false;
 }
 
