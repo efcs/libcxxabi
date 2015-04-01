@@ -46,8 +46,6 @@ void test1()
     }
 }
 
-struct A {};
-
 void test2()
 {
     try
