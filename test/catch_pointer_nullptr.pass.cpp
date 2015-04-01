@@ -220,11 +220,14 @@ int main()
 
   generate_tests<int, int, 3>()();
   generate_tests<Base, Derived, 2>()();
+  generate_tests<Derived, Base, 2>()();
+
   generate_tests<int A::*, int A::*, 3>()();
   generate_tests<int Base::*, int Derived::*, 2>()();
-
+  generate_tests<int Derived::*, int Base::*, 2>()();
 
   if (should_abort) {
+    std::cerr << "Aborting..." << std::endl;
     std::abort();
   }
 }
