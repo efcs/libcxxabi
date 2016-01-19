@@ -20,11 +20,27 @@
 // RUN: %t.exe
 
 #include <stdio.h>
+#include <string.h>
 #include <cassert>
 #include <typeinfo>
 
+
+inline
+bool
+is_equal(const std::type_info* x, const std::type_info* y, bool use_strcmp)
+{
+#ifndef _WIN32
+    if (!use_strcmp)
+        return x == y;
+    return strcmp(x->name(), y->name()) == 0;
+#else
+    return (x == y) || (strcmp(x->name(), y->name()) == 0);
+#endif
+}
+
 struct NeverDefined;
 void ThrowNeverDefinedMP();
+std::type_info const& ReturnTypeInfoNeverDefinedMP();
 
 struct IncompleteAtThrow;
 void ThrowIncompleteMP();
@@ -45,11 +61,11 @@ void ThrowNullptr();
 #ifndef TU_ONE
 
 void ThrowNeverDefinedMP() { throw (int NeverDefined::*)nullptr; }
-
 void ThrowIncompleteMP() { throw (int IncompleteAtThrow::*)nullptr; }
 void ThrowIncompletePP() { throw (IncompleteAtThrow**)nullptr; }
 void ThrowIncompletePMP() { throw (int IncompleteAtThrow::**)nullptr; }
 
+std::type_info const& ReturnTypeInfoNeverDefinedMP() { return typeid(int NeverDefined::*); }
 std::type_info const& ReturnTypeInfoIncompleteMP() { return typeid(int IncompleteAtThrow::*); }
 std::type_info const& ReturnTypeInfoIncompletePP() { return typeid(IncompleteAtThrow**); }
 
@@ -68,6 +84,8 @@ void ThrowNullptr() { throw nullptr; }
 struct IncompleteAtThrow {};
 
 int main() {
+  assert(!is_equal(&ReturnTypeInfoNeverDefinedMP(), &typeid(int NeverDefined::*), false));
+  assert(is_equal(&ReturnTypeInfoNeverDefinedMP(), &typeid(int NeverDefined::*), true));
   try {
     ThrowNeverDefinedMP();
     assert(false);
