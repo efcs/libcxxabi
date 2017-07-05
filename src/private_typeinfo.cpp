@@ -8,6 +8,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "private_typeinfo.h"
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+#include <cassert>
 
 // The flag _LIBCXX_DYNAMIC_FALLBACK is used to make dynamic_cast more
 // forgiving when type_info's mistakenly have hidden visibility and thus
@@ -666,7 +670,7 @@ __dynamic_cast(const void *static_ptr, const __class_type_info *static_type,
     {
         // Not using giant short cut.  Do the search
         dynamic_type->search_below_dst(&info, dynamic_ptr, public_path, false);
- #ifdef _LIBCXX_DYNAMIC_FALLBACK
+ #ifdef _LIBCXX_DYNAMIC_FALLBAC
         // The following if should always be false because we should definitely
         //   find (static_ptr, static_type), either on a public or private path
         if (info.path_dst_ptr_to_static_ptr == unknown &&
@@ -687,8 +691,11 @@ __dynamic_cast(const void *static_ptr, const __class_type_info *static_type,
         case 0:
             if (info.number_to_dst_ptr == 1 &&
                     info.path_dynamic_ptr_to_static_ptr == public_path &&
-                    info.path_dynamic_ptr_to_dst_ptr == public_path)
+                    info.path_dynamic_ptr_to_dst_ptr == public_path) {
+                assert(info.src2dst_offset != -3);
+
                 dst_ptr = info.dst_ptr_not_leading_to_static_ptr;
+            }
             break;
         case 1:
             if (info.path_dst_ptr_to_static_ptr == public_path ||
