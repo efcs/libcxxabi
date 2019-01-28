@@ -24,6 +24,7 @@ config.use_target               = len("@LIBCXXABI_TARGET_TRIPLE@") > 0
 config.sysroot                  = "@LIBCXXABI_SYSROOT@"
 config.gcc_toolchain            = "@LIBCXXABI_GCC_TOOLCHAIN@"
 config.cxx_ext_threads          = "@LIBCXXABI_BUILD_EXTERNAL_THREAD_LIBRARY@"
+config.enable_potentially_blocking_region_hooks = "@LIBCXXABI_ENABLE_POTENTIALLY_BLOCKING_REGION_HOOKS@"
 
 # Let the main config do the real work.
 lit_config.load_config(config, "@LIBCXXABI_SOURCE_DIR@/test/lit.cfg")

@@ -58,6 +58,10 @@ option(LIBCXXABI_HAS_EXTERNAL_THREAD_API
 option(LIBCXXABI_BUILD_EXTERNAL_THREAD_LIBRARY
   "Build libc++abi with an externalized threading library.
    This option may only be set to ON when LIBCXXABI_ENABLE_THREADS=ON" OFF)
+option(LIBCXXABI_ENABLE_POTENTIALLY_BLOCKING_REGION_HOOKS
+  "Build libc++abi with support for overridding
+  __libcppabi_begin_potentially_blocking_region_begin and
+  __libcppabi_potentially_blocking_region_end as weak symbols" OFF)
 
 # FIXME: This option should default to off. Unfortunatly GCC 4.9 fails to link
 # programs to due undefined references to new/delete in libc++abi. Once this
@@ -427,6 +431,10 @@ endif()
 
 if (LIBCXXABI_BAREMETAL)
     add_definitions(-DLIBCXXABI_BAREMETAL)
+endif()
+
+if (LIBCXXABI_ENABLE_POTENTIALLY_BLOCKING_REGION_HOOKS)
+  add_definitions(-DLIBCXXABI_ENABLE_POTENTIALLY_BLOCKING_REGION_HOOKS)
 endif()
 
 string(REPLACE ";" " " LIBCXXABI_CXX_FLAGS "${LIBCXXABI_CXX_FLAGS}")

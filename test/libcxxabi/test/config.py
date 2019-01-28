@@ -47,6 +47,8 @@ class Configuration(LibcxxConfiguration):
             self.config.available_features.add('libcxxabi-shared-externally-threaded')
         if not self.get_lit_bool('llvm_unwinder', False):
             self.config.available_features.add('libcxxabi-has-system-unwinder')
+        if self.get_lit_bool('enable_potentially_blocking_region_hooks', False):
+            self.config.available_features.add('libcxxabi-potentially-blocking-region-hooks')
 
     def configure_compile_flags(self):
         self.cxx.compile_flags += [

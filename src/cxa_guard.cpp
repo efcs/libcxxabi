@@ -9,6 +9,7 @@
 #include "__cxxabi_config.h"
 
 #include "abort_message.h"
+#include "potentially_blocking_region_hooks.h"
 #include <__threading_support>
 
 #include <stdint.h>
@@ -169,6 +170,8 @@ extern "C"
 
 #ifndef _LIBCXXABI_HAS_NO_THREADS
 _LIBCXXABI_FUNC_VIS int __cxa_guard_acquire(guard_type *guard_object) {
+    potentially_blocking_region lpbr;
+
     char* initialized = (char*)guard_object;
     if (std::__libcpp_mutex_lock(&guard_mut))
         abort_message("__cxa_guard_acquire failed to acquire mutex");
