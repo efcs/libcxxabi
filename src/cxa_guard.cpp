@@ -64,9 +64,51 @@ bool is_initialized(guard_type* guard_object) {
 #endif
 #endif
 
+enum class OnRelease : char { UNLOCK, UNLOCK_AND_BROADCAST };
+
+struct GlobalMutexGuard {
+  explicit GlobalMutexGuard(const char* calling_func, OnRelease on_release) : calling_func(calling_func), on_release(on_release) {
 #ifndef _LIBCXXABI_HAS_NO_THREADS
-std::__libcpp_mutex_t guard_mut = _LIBCPP_MUTEX_INITIALIZER;
-std::__libcpp_condvar_t guard_cv = _LIBCPP_CONDVAR_INITIALIZER;
+    if (std::__libcpp_mutex_lock(&guard_mut))
+      abort_message("%s failed to acquire mutex", calling_func);
+#endif
+  }
+
+  ~GlobalMutexGuard() {
+#ifndef _LIBCXXABI_HAS_NO_THREADS
+    if (std::__libcpp_mutex_unlock(&guard_mut))
+      abort_message("%s failed to release mutex", calling_func);
+    if (on_release == OnRelease::UNLOCK_AND_BROADCAST) {
+      if (std::__libcpp_condvar_broadcast(&guard_cv))
+        abort_message("%s failed to broadcast condition variable", calling_func);
+    }
+#endif
+  }
+
+  void wait_for_signal() {
+#ifndef _LIBCXXABI_HAS_NO_THREADS
+    if (std::__libcpp_condvar_wait(&guard_cv, &guard_mut))
+      abort_message("%s condition variable wait failed", calling_func);
+#endif
+  }
+
+private:
+  GlobalMutexGuard(GlobalMutexGuard const&) = delete;
+  GlobalMutexGuard& operator=(GlobalMutexGuard const&) = delete;
+
+  const char* const calling_func;
+  OnRelease on_release;
+
+#ifndef _LIBCXXABI_HAS_NO_THREADS
+  static std::__libcpp_mutex_t guard_mut;
+  static std::__libcpp_condvar_t guard_cv;
+#endif
+};
+
+#ifndef _LIBCXXABI_HAS_NO_THREADS
+std::__libcpp_mutex_t GlobalMutexGuard::guard_mut = _LIBCPP_MUTEX_INITIALIZER;
+std::__libcpp_condvar_t GlobalMutexGuard::guard_cv =
+    _LIBCPP_CONDVAR_INITIALIZER;
 #endif
 
 #if defined(__APPLE__) && !defined(__arm__)
@@ -169,12 +211,10 @@ extern "C"
 
 #ifndef _LIBCXXABI_HAS_NO_THREADS
 _LIBCXXABI_FUNC_VIS int __cxa_guard_acquire(guard_type *guard_object) {
-    char* initialized = (char*)guard_object;
-    if (std::__libcpp_mutex_lock(&guard_mut))
-        abort_message("__cxa_guard_acquire failed to acquire mutex");
-    int result = *initialized == 0;
-    if (result)
-    {
+  GlobalMutexGuard gmutex("__cxa_guard_acquire", OnRelease::UNLOCK);
+  char* initialized = (char*)guard_object;
+  int result = *initialized == 0;
+  if (result) {
 #if defined(__APPLE__) && !defined(__arm__)
         // This is a special-case pthread dependency for Mac. We can't pull this
         // out into libcxx's threading API (__threading_support) because not all
@@ -197,9 +237,8 @@ _LIBCXXABI_FUNC_VIS int __cxa_guard_acquire(guard_type *guard_object) {
                 abort_message("__cxa_guard_acquire detected deadlock");
             do
             {
-                if (std::__libcpp_condvar_wait(&guard_cv, &guard_mut))
-                    abort_message("__cxa_guard_acquire condition variable wait failed");
-                lock = get_lock(*guard_object);
+              gmutex.wait_for_signal();
+              lock = get_lock(*guard_object);
             } while (lock);
             result = !is_initialized(guard_object);
             if (result)
@@ -208,38 +247,15 @@ _LIBCXXABI_FUNC_VIS int __cxa_guard_acquire(guard_type *guard_object) {
         else
             set_lock(*guard_object, id);
 #else  // !__APPLE__ || __arm__
-        while (get_lock(*guard_object))
-            if (std::__libcpp_condvar_wait(&guard_cv, &guard_mut))
-                abort_message("__cxa_guard_acquire condition variable wait failed");
+    while (get_lock(*guard_object)) {
+      gmutex.wait_for_signal();
+    }
         result = *initialized == 0;
         if (result)
             set_lock(*guard_object, true);
 #endif  // !__APPLE__ || __arm__
     }
-    if (std::__libcpp_mutex_unlock(&guard_mut))
-        abort_message("__cxa_guard_acquire failed to release mutex");
     return result;
-}
-
-_LIBCXXABI_FUNC_VIS void __cxa_guard_release(guard_type *guard_object) {
-    if (std::__libcpp_mutex_lock(&guard_mut))
-        abort_message("__cxa_guard_release failed to acquire mutex");
-    *guard_object = 0;
-    set_initialized(guard_object);
-    if (std::__libcpp_mutex_unlock(&guard_mut))
-        abort_message("__cxa_guard_release failed to release mutex");
-    if (std::__libcpp_condvar_broadcast(&guard_cv))
-        abort_message("__cxa_guard_release failed to broadcast condition variable");
-}
-
-_LIBCXXABI_FUNC_VIS void __cxa_guard_abort(guard_type *guard_object) {
-    if (std::__libcpp_mutex_lock(&guard_mut))
-        abort_message("__cxa_guard_abort failed to acquire mutex");
-    *guard_object = 0;
-    if (std::__libcpp_mutex_unlock(&guard_mut))
-        abort_message("__cxa_guard_abort failed to release mutex");
-    if (std::__libcpp_condvar_broadcast(&guard_cv))
-        abort_message("__cxa_guard_abort failed to broadcast condition variable");
 }
 
 #else // _LIBCXXABI_HAS_NO_THREADS
@@ -248,16 +264,19 @@ _LIBCXXABI_FUNC_VIS int __cxa_guard_acquire(guard_type *guard_object) {
     return !is_initialized(guard_object);
 }
 
+#endif // !_LIBCXXABI_HAS_NO_THREADS
+
 _LIBCXXABI_FUNC_VIS void __cxa_guard_release(guard_type *guard_object) {
-    *guard_object = 0;
-    set_initialized(guard_object);
+  GlobalMutexGuard gmutex("__cxa_guard_release", OnRelease::UNLOCK_AND_BROADCAST);
+  *guard_object = 0;
+  set_initialized(guard_object);
 }
 
 _LIBCXXABI_FUNC_VIS void __cxa_guard_abort(guard_type *guard_object) {
-    *guard_object = 0;
+  GlobalMutexGuard gmutex("__cxa_guard_abort", OnRelease::UNLOCK);
+  *guard_object = 0;
 }
 
-#endif // !_LIBCXXABI_HAS_NO_THREADS
 
 }  // extern "C"
 
