@@ -37,17 +37,6 @@ typedef uint32_t guard_type;
 inline void set_initialized(guard_type* guard_object) {
     *guard_object |= 1;
 }
-#else
-typedef uint64_t guard_type;
-
-void set_initialized(guard_type* guard_object) {
-    char* initialized = (char*)guard_object;
-    *initialized = 1;
-}
-#endif
-
-#if defined(_LIBCXXABI_HAS_NO_THREADS) || (defined(__APPLE__) && !defined(__arm__))
-#ifdef __arm__
 
 // Test the lowest bit.
 inline bool is_initialized(guard_type* guard_object) {
@@ -55,13 +44,17 @@ inline bool is_initialized(guard_type* guard_object) {
 }
 
 #else
+typedef uint64_t guard_type;
+
+void set_initialized(guard_type* guard_object) {
+    char* initialized = (char*)guard_object;
+    *initialized = 1;
+}
 
 bool is_initialized(guard_type* guard_object) {
     char* initialized = (char*)guard_object;
     return *initialized;
 }
-
-#endif
 #endif
 
 enum class OnRelease : char { UNLOCK, UNLOCK_AND_BROADCAST };
@@ -209,13 +202,14 @@ inline void set_lock(uint32_t& x, lock_type y)
 extern "C"
 {
 
-#ifndef _LIBCXXABI_HAS_NO_THREADS
 _LIBCXXABI_FUNC_VIS int __cxa_guard_acquire(guard_type *guard_object) {
-  GlobalMutexGuard gmutex("__cxa_guard_acquire", OnRelease::UNLOCK);
-  char* initialized = (char*)guard_object;
-  int result = *initialized == 0;
-  if (result) {
-#if defined(__APPLE__) && !defined(__arm__)
+    GlobalMutexGuard gmutex("__cxa_guard_acquire", OnRelease::UNLOCK);
+    int result = !is_initialized(guard_object);
+    if (result)
+    {
+#if defined(_LIBCXXABI_HAS_NO_THREADS)
+      // nothing to do
+#elif defined(__APPLE__) && !defined(__arm__)
         // This is a special-case pthread dependency for Mac. We can't pull this
         // out into libcxx's threading API (__threading_support) because not all
         // supported Mac environments provide this function (in pthread.h). To
@@ -247,24 +241,16 @@ _LIBCXXABI_FUNC_VIS int __cxa_guard_acquire(guard_type *guard_object) {
         else
             set_lock(*guard_object, id);
 #else  // !__APPLE__ || __arm__
-    while (get_lock(*guard_object)) {
-      gmutex.wait_for_signal();
-    }
-        result = *initialized == 0;
+        while (get_lock(*guard_object)) {
+          gmutex.wait_for_signal();
+        }
+        result = !is_initialized(guard_object);
         if (result)
             set_lock(*guard_object, true);
 #endif  // !__APPLE__ || __arm__
     }
     return result;
 }
-
-#else // _LIBCXXABI_HAS_NO_THREADS
-
-_LIBCXXABI_FUNC_VIS int __cxa_guard_acquire(guard_type *guard_object) {
-    return !is_initialized(guard_object);
-}
-
-#endif // !_LIBCXXABI_HAS_NO_THREADS
 
 _LIBCXXABI_FUNC_VIS void __cxa_guard_release(guard_type *guard_object) {
   GlobalMutexGuard gmutex("__cxa_guard_release", OnRelease::UNLOCK_AND_BROADCAST);
