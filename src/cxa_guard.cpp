@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "__cxxabi_config.h"
+#include "include/atomic_support.h"
 
 #include "abort_message.h"
 #include <__threading_support>
@@ -29,6 +30,124 @@ namespace __cxxabiv1
 
 namespace
 {
+
+enum class ABI {
+  Itanium,
+  ARM
+};
+
+enum class ImplKind {
+  NoThreads,
+  GlobalMutex,
+  AtomicFutex,
+};
+#define DISALLOW_COPY(T) T(T const&) = delete; T& operator=(T const&) = delete
+
+static constexpr uint8_t INIT_COMPLETE_BIT = 1;
+static constexpr uint8_t INIT_PENDING_BIT = 2;
+static constexpr uint8_t WAITING_BIT = 4;
+
+template <ABI>
+struct GuardABIInfo;
+
+template <> struct GuardABIInfo<ABI::Itanium> {
+  using guard_type = uint64_t;
+};
+
+template <> struct GuardABIInfo<ABI::ARM> {
+  using guard_type = uint32_t;
+};
+
+struct AtomicByte {
+  explicit AtomicByte(uint8_t *b) : b(b) {}
+
+  uint8_t load(std::__libcpp_atomic_order ord) {
+    return std::__libcpp_atomic_load(b, ord);
+  }
+  void store(uint8_t val, std::__libcpp_atomic_order ord) {
+    std::__libcpp_atomic_store(b, val, ord);
+  }
+  uint8_t exchange(uint8_t new_val, std::__libcpp_atomic_order ord) {
+    return std::__libcpp_atomic_exchange(b, new_val, ord);
+  }
+  bool compare_exchange(uint8_t *expected, uint8_t desired, std::__libcpp_atomic_order ord_success, std::__libcpp_atomic_order ord_failure) {
+    return std::__libcpp_atomic_compare_exchange(b, expected, desired, ord_success, ord_failure);
+  }
+
+private:
+  DISALLOW_COPY(AtomicByte);
+
+  uint8_t *b;
+};
+
+
+struct NonAtomicByte {
+  explicit NonAtomicByte(uint8_t *b) : b(b) {}
+
+  uint8_t load(std::__libcpp_atomic_order ) {
+    return *b;
+  }
+  void store(uint8_t val, std::__libcpp_atomic_order ) {
+    *b = val;
+  }
+  uint8_t exchange(uint8_t new_val, std::__libcpp_atomic_order ) {
+    uint8_t tmp = *b;
+    *b = new_val;
+    return tmp;
+  }
+
+  bool compare_exchange(uint8_t *expected, uint8_t desired, std::__libcpp_atomic_order, std::__libcpp_atomic_order) {
+    if (*b == *expected) {
+      *b = desired;
+      return true;
+    }
+    *expected = *b;
+    return false;
+  }
+
+ private:
+  DISALLOW_COPY(NonAtomicByte);
+
+  uint8_t *b;
+};
+
+template <class GetTID>
+struct PThreadDeadlockDetector {
+  explicit PThreadDeadlockDetector(uint64_t* g)
+    : thread_id_word(static_cast<uint32_t*>(static_cast<void*>(g)) + 1) {}
+
+  bool check_for_deadlock() {
+    return get_thread_id() == *thread_id_word;
+  }
+
+  void store_current_thread_id() {
+    *thread_id_word = get_thread_id();
+  }
+
+private:
+  uint32_t get_thread_id() {
+    if (!has_thread_id) {
+      this_thread_id_cache = GetTID{}();
+      has_thread_id = true;
+    }
+    return this_thread_id_cache;
+  }
+
+  DISALLOW_COPY(PThreadDeadlockDetector);
+
+  bool has_thread_id = false;
+  uint32_t this_thread_id_cache;
+  uint32_t *thread_id_word;
+};
+
+struct NopThreadDeadlockDetector {
+  explicit NopThreadDeadlockDetector(uint64_t *) {}
+  bool check_for_deadlock() { return false; }
+  void set_current_thread_id() {}
+
+ private:
+ DISALLOW_COPY(NopThreadDeadlockDetector);
+};
 
 enum InitializationResult {
   INIT_COMPLETE,
@@ -63,6 +182,9 @@ typedef uint32_t lock_type;
 #define LOCK_ID_FOR_THREAD() true
 typedef bool lock_type;
 #endif
+
+template <ABI>
+uint8_t *GuardByteForABI(guard_type *g);
 
 enum class OnRelease : char { UNLOCK, UNLOCK_AND_BROADCAST };
 
@@ -153,7 +275,9 @@ private:
 
 /// GuardObject - Manages correctly reading and writing to the guard object.
 struct GuardObject {
-  explicit GuardObject(guard_type *g) : guard(g) {}
+  explicit GuardObject(guard_type *g) : guard(g),
+    guard_byte(static_cast<uint8_t*>(static_cast<void*>(g))),
+    init_byte(static_cast<uint8_t*>(static_cast<void*>(g)) + 1) {}
 
   // Read the current value of the guard object.
   // TODO: Make this read atomic.
@@ -163,11 +287,16 @@ struct GuardObject {
   // TODO: Make this atomic
   void write(GuardValue new_val);
 
+  bool acquire_guard() { return guard_byte.load(std::_AO_Acquire); }
+  void set_guard_and_release() { return guard_byte.store(1, std::_AO_Release); }
+
 private:
   GuardObject(const GuardObject&) = delete;
   GuardObject& operator=(const GuardObject&) = delete;
 
   guard_type *guard;
+  AtomicByte guard_byte;
+  AtomicByte init_byte;
 };
 
 }  // unnamed namespace
