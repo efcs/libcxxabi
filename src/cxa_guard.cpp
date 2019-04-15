@@ -15,6 +15,9 @@
 #include <stdint.h>
 #include <string.h>
 
+#define DISALLOW_COPY(T) T(T const&) = delete; T& operator=(T const&) = delete
+
+
 /*
     This implementation must be careful to not call code external to this file
     which will turn around and try to call __cxa_guard_acquire reentrantly.
@@ -34,69 +37,89 @@ namespace
 enum class ABI {
   Itanium,
   ARM
+#ifdef __arm__
+  Current = ARM
+#else
+  Current = Itanium
+#endif
 };
 
-enum class ImplKind {
+enum class Platform {
+  Apple,
+  POSIX,
+  Other,
+#ifdef __APPLE__
+  Current = Apple
+#elif defined(__unix__)
+  Current = POSIX
+#else
+  Current = Other
+#endif
+};
+
+enum class Implementation {
   NoThreads,
-  GlobalMutex,
-  AtomicFutex,
-};
-#define DISALLOW_COPY(T) T(T const&) = delete; T& operator=(T const&) = delete
-
-static constexpr uint8_t INIT_COMPLETE_BIT = 1;
-static constexpr uint8_t INIT_PENDING_BIT = 2;
-static constexpr uint8_t WAITING_BIT = 4;
-
-template <ABI>
-struct GuardABIInfo;
-
-template <> struct GuardABIInfo<ABI::Itanium> {
-  using guard_type = uint64_t;
+  GlobalLock,
+  Futex,
+#if defined(_LIBCXXABI_HAS_NO_THREADS)
+  Current = NoThreads
+#elif defined(_LIBCXXABI_USE_FUTEX)
+  Current = Futex
+#else
+  Current = GlobalLock
+#endif
 };
 
-template <> struct GuardABIInfo<ABI::ARM> {
-  using guard_type = uint32_t;
+enum InitializationResult {
+  INIT_COMPLETE,
+  INIT_NOT_COMPLETE,
 };
 
-struct AtomicByte {
-  explicit AtomicByte(uint8_t *b) : b(b) {}
 
-  uint8_t load(std::__libcpp_atomic_order ord) {
+template <ABI ABIKind>
+using GuardType =
+    typename std::conditional<ABIKind == ABI::ARM, uint32_t, uint64_t>::type;
+
+template <class IntType>
+struct AtomicInt {
+  explicit AtomicInt(IntType *b) : b(b) {}
+
+  IntType load(std::__libcpp_atomic_order ord) {
     return std::__libcpp_atomic_load(b, ord);
   }
-  void store(uint8_t val, std::__libcpp_atomic_order ord) {
+  void store(IntType val, std::__libcpp_atomic_order ord) {
     std::__libcpp_atomic_store(b, val, ord);
   }
-  uint8_t exchange(uint8_t new_val, std::__libcpp_atomic_order ord) {
+  IntType exchange(IntType new_val, std::__libcpp_atomic_order ord) {
     return std::__libcpp_atomic_exchange(b, new_val, ord);
   }
-  bool compare_exchange(uint8_t *expected, uint8_t desired, std::__libcpp_atomic_order ord_success, std::__libcpp_atomic_order ord_failure) {
+  bool compare_exchange(IntType *expected, IntType desired, std::__libcpp_atomic_order ord_success, std::__libcpp_atomic_order ord_failure) {
     return std::__libcpp_atomic_compare_exchange(b, expected, desired, ord_success, ord_failure);
   }
 
 private:
-  DISALLOW_COPY(AtomicByte);
+  DISALLOW_COPY(AtomicInt);
 
-  uint8_t *b;
+  IntType *b;
 };
 
+template <class IntType>
+struct NonAtomicInt {
+  explicit NonAtomicInt(IntType *b) : b(b) {}
 
-struct NonAtomicByte {
-  explicit NonAtomicByte(uint8_t *b) : b(b) {}
-
-  uint8_t load(std::__libcpp_atomic_order ) {
+  IntType load(std::__libcpp_atomic_order ) {
     return *b;
   }
-  void store(uint8_t val, std::__libcpp_atomic_order ) {
+  void store(IntType val, std::__libcpp_atomic_order ) {
     *b = val;
   }
-  uint8_t exchange(uint8_t new_val, std::__libcpp_atomic_order ) {
-    uint8_t tmp = *b;
+  IntType exchange(IntType new_val, std::__libcpp_atomic_order ) {
+    IntType tmp = *b;
     *b = new_val;
     return tmp;
   }
 
-  bool compare_exchange(uint8_t *expected, uint8_t desired, std::__libcpp_atomic_order, std::__libcpp_atomic_order) {
+  bool compare_exchange(IntType *expected, IntType desired, std::__libcpp_atomic_order, std::__libcpp_atomic_order) {
     if (*b == *expected) {
       *b = desired;
       return true;
@@ -106,15 +129,33 @@ struct NonAtomicByte {
   }
 
  private:
-  DISALLOW_COPY(NonAtomicByte);
+  DISALLOW_COPY(NonAtomicInt);
 
-  uint8_t *b;
+  IntType *b;
 };
 
-template <class GetTID>
-struct PThreadDeadlockDetector {
-  explicit PThreadDeadlockDetector(uint64_t* g)
-    : thread_id_word(static_cast<uint32_t*>(static_cast<void*>(g)) + 1) {}
+
+using GetTIDFunc = uint32_t();
+
+template <GetTIDFunc* = nullptr>
+struct RecursiveInitDetector;
+
+template <>
+struct RecursiveInitDetector<nullptr> {
+  explicit RecursiveInitDetector(uint32_t*) {}
+  explicit RecursiveInitDetector(uint64_t*) {}
+  bool check_for_deadlock() { return false; }
+  void store_current_thread_id() {}
+private:
+ DISALLOW_COPY(RecursiveInitDetector);
+};
+
+template <GetTIDFunc *GetTID>
+struct RecursiveInitDetector {
+  explicit RecursiveInitDetector(uint64_t* g)
+  : thread_id_word(static_cast<uint32_t*>(static_cast<void*>(g)) + 1) {}
+
+  explicit RecursiveInitDetector(uint32_t*) = delete;
 
   bool check_for_deadlock() {
     return get_thread_id() == *thread_id_word;
@@ -124,67 +165,22 @@ struct PThreadDeadlockDetector {
     *thread_id_word = get_thread_id();
   }
 
-private:
+ private:
   uint32_t get_thread_id() {
     if (!has_thread_id) {
-      this_thread_id_cache = GetTID{}();
+      this_thread_id_cache = GetTID();
       has_thread_id = true;
     }
     return this_thread_id_cache;
   }
 
-  DISALLOW_COPY(PThreadDeadlockDetector);
-
   bool has_thread_id = false;
   uint32_t this_thread_id_cache;
   uint32_t *thread_id_word;
-};
-
-struct NopThreadDeadlockDetector {
-  explicit NopThreadDeadlockDetector(uint64_t *) {}
-  bool check_for_deadlock() { return false; }
-  void set_current_thread_id() {}
 
  private:
- DISALLOW_COPY(NopThreadDeadlockDetector);
+  DISALLOW_COPY(RecursiveInitDetector);
 };
-
-enum InitializationResult {
-  INIT_COMPLETE,
-  INIT_NOT_COMPLETE,
-};
-
-#if defined(_LIBCXXABI_GUARD_ABI_ARM)
-// A 32-bit, 4-byte-aligned static data value. The least significant 2 bits must
-// be statically initialized to 0.
-typedef uint32_t guard_type;
-#else
-typedef uint64_t guard_type;
-#endif
-
-#if !defined(_LIBCXXABI_HAS_NO_THREADS) && defined(__APPLE__) &&               \
-    !defined(_LIBCXXABI_GUARD_ABI_ARM)
-// This is a special-case pthread dependency for Mac. We can't pull this
-// out into libcxx's threading API (__threading_support) because not all
-// supported Mac environments provide this function (in pthread.h). To
-// make it possible to build/use libcxx in those environments, we have to
-// keep this pthread dependency local to libcxxabi. If there is some
-// convenient way to detect precisely when pthread_mach_thread_np is
-// available in a given Mac environment, it might still be possible to
-// bury this dependency in __threading_support.
-#ifndef _LIBCPP_HAS_THREAD_API_PTHREAD
-#error "How do I pthread_mach_thread_np()?"
-#endif
-#define LIBCXXABI_HAS_DEADLOCK_DETECTION
-#define LOCK_ID_FOR_THREAD() pthread_mach_thread_np(std::__libcpp_thread_get_current_id())
-typedef uint32_t lock_type;
-#else
-#define LOCK_ID_FOR_THREAD() true
-typedef bool lock_type;
-#endif
-
-template <ABI>
-uint8_t *GuardByteForABI(guard_type *g);
 
 enum class OnRelease : char { UNLOCK, UNLOCK_AND_BROADCAST };
 
@@ -237,6 +233,23 @@ std::__libcpp_condvar_t GlobalMutexGuard::guard_cv =
 
 struct GuardObject;
 
+
+static constexpr uint8_t INIT_COMPLETE_BIT = 1;
+static constexpr uint8_t INIT_PENDING_BIT = 2;
+static constexpr uint8_t WAITING_BIT = 4;
+
+template <Implementation Impl>
+class InitFlagsByte;
+
+template <Implementation Impl>
+struct InitFlagsByte {
+  bool is_initialization_complete();
+  bool is_initializ
+private:
+   NonAtomicInt<uint8_t> byte;
+};
+
+#if 0
 /// GuardValue - An abstraction for accessing the various fields and bits of
 ///   the guard object.
 struct GuardValue {
@@ -272,32 +285,88 @@ private:
 private:
   guard_type value;
 };
+#endif
+
+template <Implementation Impl, ABI ABIKind, Platform Plat>
+struct ImplementationTypes {
+  using guard_type = GuardType<ABIKind>;
+  using guard_byte_t = typename std::conditional<
+      Impl == Implementation::NoThreads,
+      NonAtomicByte,
+      AtomicByte>::type;
+  using init_byte_t = typename std::conditional<
+      Impl != Implementation::Futex,
+      NonAtomicByte,
+      AtomicByte>::type;
+  using recursive_init_detector_t = typename std::conditional<
+      ABIKind == ABI::Itanium &&
+      Plat != Platform::Other &&
+      Impl != Implementation::NoThreads,
+      RecursiveInitDetector<nullptr>,
+      RecursiveInitDetector<nullptr>
+    >::type;
+  
+  
+};
 
 /// GuardObject - Manages correctly reading and writing to the guard object.
+template <class GuardType, class InitByteT, class RecInitDetector>
 struct GuardObject {
-  explicit GuardObject(guard_type *g) : guard(g),
+  explicit GuardObject(GuardType *g) : guard(g),
     guard_byte(static_cast<uint8_t*>(static_cast<void*>(g))),
-    init_byte(static_cast<uint8_t*>(static_cast<void*>(g)) + 1) {}
+    init_byte(static_cast<uint8_t*>(static_cast<void*>(g)) + 1),
+    rec_init(g)
+     {}
 
   // Read the current value of the guard object.
   // TODO: Make this read atomic.
-  GuardValue read() const;
+  uint8_t read_init_byte() const;
 
   // Write the specified value to the guard object.
   // TODO: Make this atomic
-  void write(GuardValue new_val);
+  void write_init_byte(uint8_t new_val);
 
   bool acquire_guard() { return guard_byte.load(std::_AO_Acquire); }
   void set_guard_and_release() { return guard_byte.store(1, std::_AO_Release); }
+
+  GuardType *guard;
+  AtomicByte guard_byte;
+  InitByteT init_byte;
+  RecInitDetector rec_init;
 
 private:
   GuardObject(const GuardObject&) = delete;
   GuardObject& operator=(const GuardObject&) = delete;
 
-  guard_type *guard;
-  AtomicByte guard_byte;
-  AtomicByte init_byte;
 };
+
+template <class GuardObjectT>
+int cxa_guard_acquire(typename GuardObjectT::GuardType *g) {
+  GuardObjectT guard(g);
+  if (guard.guard_byte.load(std::_AO_Acquire) == INIT_COMPLETE_BIT)
+    return INIT_COMPLETE;
+    
+  
+  return INIT_NOT_COMPLETE;
+}
+
+template <class GuardObjectT>
+void cxa_guard_release(typename GuardObjectT::GuardType *g) {
+  GuardObjectT guard(g);
+  guard.init_byte.store(INIT_COMPLETE_BIT, std::_AO_Release);
+  guard.guard_byte.store(INIT_COMPLETE_BIT, std::_AO_Release);
+}
+
+
+template <class GuardObjectT>
+void cxa_guard_abort(typename GuardObjectT::GuardType *g) {
+  GuardObjectT guard(g);
+  guard.init_byte.store(0, std::_AO_Release);
+}
+
+
+
+
 
 }  // unnamed namespace
 
@@ -307,6 +376,7 @@ extern "C"
 _LIBCXXABI_FUNC_VIS int __cxa_guard_acquire(guard_type* raw_guard_object) {
   GlobalMutexGuard gmutex("__cxa_guard_acquire", OnRelease::UNLOCK);
   GuardObject guard(raw_guard_object);
+  
   GuardValue current_value = guard.read();
 
   if (current_value.is_initialization_complete())
