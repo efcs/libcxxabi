@@ -2,13 +2,13 @@
 #define LIBCXXABI_SRC_INCLUDE_CXA_GUARD_IMPL_H
 
 #include "__cxxabi_config.h"
-#include "atomic_support.h"
+#include "include/atomic_support.h"
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 
 #ifndef ABORT_WITH_MESSAGE
-#include "../abort_message.h"
+#include "abort_message.h"
 #define ABORT_WITH_MESSAGE(...) ::abort_message(__VA_ARGS__)
 #endif
 
@@ -18,10 +18,6 @@
   T(T const&) = delete;                                                        \
   T& operator=(T const&) = delete
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-#endif
 
 namespace __cxxabiv1 {
 

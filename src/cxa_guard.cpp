@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "__cxxabi_config.h"
-#include "include/cxa_guard_impl.h"
+#include "cxa_guard_impl.h"
 
 /*
     This implementation must be careful to not call code external to this file
@@ -21,10 +21,10 @@
 
 namespace __cxxabiv1 {
 
+using guard_type = std::conditional<ABI::Current == ABI::ARM, uint32_t, uint64_t>::type;
+
 extern "C"
 {
-
-using guard_type = std::conditional<ABI::Current == ABI::ARM, uint32_t, uint64_t>::type;
 
 _LIBCXXABI_FUNC_VIS int __cxa_guard_acquire(guard_type* raw_guard_object) {
   CurrentImplementation imp(raw_guard_object);
