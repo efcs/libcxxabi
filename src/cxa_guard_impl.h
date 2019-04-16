@@ -52,6 +52,7 @@ uint32_t PlatformThreadID() {
 constexpr uint32_t (*PlatformThreadID)() = nullptr;
 #endif
 
+
 //===----------------------------------------------------------------------===//
 
 
@@ -68,13 +69,12 @@ struct GuardBase {
   explicit GuardBase(uint32_t* g)
       : base_address(g), guard_byte_address(reinterpret_cast<uint8_t*>(g)),
         init_byte_address(reinterpret_cast<uint8_t*>(g) + 1),
-        thread_id_address(nullptr), has_thread_id_checking(false) {}
+        thread_id_address(nullptr) {}
 
   explicit GuardBase(uint64_t* g)
       : base_address(g), guard_byte_address(reinterpret_cast<uint8_t*>(g)),
         init_byte_address(reinterpret_cast<uint8_t*>(g) + 1),
-        thread_id_address(reinterpret_cast<uint32_t*>(g) + 1),
-        has_thread_id_checking(Derived::GetThreadID != nullptr) {}
+        thread_id_address(reinterpret_cast<uint32_t*>(g) + 1) {}
 
 public:
   AcquireResult acquire() {
@@ -98,43 +98,6 @@ public:
   uint8_t* const init_byte_address;
   uint32_t* const thread_id_address;
 
-protected:
-  void check_thread_id_for_deadlock() {
-    if (has_thread_id_checking) {
-      AtomicInt<uint32_t> thread_id(thread_id_address);
-      if (thread_id.load(std::_AO_Relaxed) == current_thread_id()) {
-        ABORT_WITH_MESSAGE("__cxa_guard_acquire detected deadlock");
-      }
-    }
-  }
-
-  void clear_thread_id() {
-    if (has_thread_id_checking) {
-      AtomicInt<uint32_t> thread_id(thread_id_address);
-      thread_id.store(0, std::_AO_Relaxed);
-    }
-  }
-
-  void store_thread_id() {
-    if (has_thread_id_checking) {
-      AtomicInt<uint32_t> thread_id(thread_id_address);
-      thread_id.store(current_thread_id(), std::_AO_Relaxed);
-    }
-  }
-
-private:
-  uint32_t current_thread_id() {
-    if (has_thread_id_checking && !is_thread_id_cached) {
-      current_thread_id_cache = Derived::GetThreadID();
-      is_thread_id_cached = true;
-    }
-    return current_thread_id_cache;
-  }
-
-  const bool has_thread_id_checking;
-  bool is_thread_id_cached = false;
-  uint32_t current_thread_id_cache = 0;
-
 private:
   Derived* derived() { return static_cast<Derived*>(this); }
 };
@@ -145,8 +108,6 @@ private:
 
 struct InitByteNoThreads : GuardBase<InitByteNoThreads> {
   using GuardBase::GuardBase;
-
-  static constexpr uint32_t (*GetThreadID)() = nullptr;
 
   AcquireResult acquire_init_byte() {
     if (*init_byte_address == COMPLETE_BIT)
@@ -195,30 +156,62 @@ private:
 };
 #endif // !defined(_LIBCXXABI_HAS_NO_THREADS)
 
+template <class T, T(*Init)()>
+struct LazyValue {
+  LazyValue() : is_init(false) {}
+
+  T& get() {
+    if (!is_init) {
+      value = Init();
+      is_init = true;
+    }
+    return value;
+  }
+private:
+  T value;
+  bool is_init = false;
+};
+
+
+
 template <class Mutex, class CondVar, Mutex& global_mutex, CondVar& global_cond,
-          uint32_t (*GetThreadIDArg)() = PlatformThreadID>
+          uint32_t (*GetThreadID)() = PlatformThreadID>
 struct InitByteGlobalMutex
     : GuardBase<InitByteGlobalMutex<Mutex, CondVar, global_mutex, global_cond,
-                                    GetThreadIDArg>> {
+                                    GetThreadID>> {
+
   using BaseT = GuardBase<InitByteGlobalMutex>;
   using BaseT::BaseT;
 
   using BaseT::init_byte_address;
+  using BaseT::thread_id_address;
+  const bool has_thread_id_support;
+  LazyValue<uint32_t, GetThreadID> current_thread_id;
 
-  static constexpr uint32_t (*GetThreadID)() = GetThreadIDArg;
+  explicit InitByteGlobalMutex(uint32_t *g) : BaseT(g), has_thread_id_support(false) {}
+  explicit InitByteGlobalMutex(uint64_t *g) : BaseT(g), has_thread_id_support(GetThreadID) {}
 
+public:
   AcquireResult acquire_init_byte() {
     LockGuard g("__cxa_guard_acquire");
-    if (*init_byte_address & PENDING_BIT) {
-      this->check_thread_id_for_deadlock();
+    // Check for possible recursive initialization.
+    if (has_thread_id_support && (*init_byte_address & PENDING_BIT)) {
+      if (*thread_id_address == current_thread_id.get())
+       ABORT_WITH_MESSAGE("__cxa_guard_acquire detected recursive initialization");
     }
+
+    // Wait until the pending bit is not set.
     while (*init_byte_address & PENDING_BIT) {
       *init_byte_address |= WAITING_BIT;
       global_cond.wait(global_mutex);
     }
-    if (*init_byte_address)
+
+    if (*init_byte_address == COMPLETE_BIT)
       return INIT_IS_DONE;
-    this->store_thread_id();
+
+    if (has_thread_id_support)
+      *thread_id_address = current_thread_id.get();
+
     *init_byte_address = PENDING_BIT;
     return INIT_IS_PENDING;
   }
@@ -235,7 +228,8 @@ struct InitByteGlobalMutex
     LockGuard g("__cxa_guard_acquire");
     bool has_waiting = *init_byte_address & WAITING_BIT;
     *init_byte_address = 0;
-    this->clear_thread_id();
+    if (thread_id_address && GetThreadID)
+      *thread_id_address = 0;
     if (has_waiting)
       g.release_and_broadcast();
   }
@@ -293,27 +287,42 @@ constexpr void (*PlatformFutexWait)(int*, int) = nullptr;
 constexpr void (*PlatformFutexWake)(int*) = nullptr;
 #endif
 
-template <void (*Wait)(int*, int), void (*Wake)(int*),
+template <void (*Wait)(int*, int) = PlatformFutexWait,
+          void (*Wake)(int*) = PlatformFutexWake,
           uint32_t (*GetThreadIDArg)() = PlatformThreadID>
 struct InitByteFutex : GuardBase<InitByteFutex<Wait, Wake, GetThreadIDArg>> {
   using BaseT = GuardBase<InitByteFutex>;
-  using BaseT::BaseT;
-  using BaseT::init_byte_address;
 
-  static constexpr uint32_t (*GetThreadID)() = GetThreadIDArg;
+  explicit InitByteFutex(uint32_t *g) : BaseT(g),
+    init_byte(this->init_byte_address), thread_id(this->thread_id_address),
+    has_thread_id_support(this->thread_id_address && GetThreadIDArg) {}
+
+  explicit InitByteFutex(uint64_t *g) : BaseT(g),
+    init_byte(this->init_byte_address), thread_id(this->thread_id_address),
+    has_thread_id_support(this->thread_id_address && GetThreadIDArg) {}
+
 
   AcquireResult acquire_init_byte() {
-    AtomicInt<uint8_t> init_byte(init_byte_address);
     while (true) {
       uint8_t last_val = 0;
       if (init_byte.compare_exchange(&last_val, PENDING_BIT, std::_AO_Acq_Rel,
                                      std::_AO_Acquire)) {
-        this->store_thread_id();
+        if (has_thread_id_support) {
+          thread_id.store(current_thread_id.get(), std::_AO_Relaxed);
+        }
         return INIT_IS_PENDING;
-      } else if (last_val == COMPLETE_BIT) {
+      }
+
+      if (last_val == COMPLETE_BIT)
         return INIT_IS_DONE;
-      } else if (last_val & PENDING_BIT) {
-        this->check_thread_id_for_deadlock();
+
+      if (last_val & PENDING_BIT) {
+
+        // Check for recursive initialization
+        if (has_thread_id_support && thread_id.load(std::_AO_Relaxed) == current_thread_id.get()) {
+            ABORT_WITH_MESSAGE("__cxa_guard_acquire detected recursive initialization");
+        }
+
         if ((last_val & WAITING_BIT) == 0) {
           if (!init_byte.compare_exchange(&last_val, PENDING_BIT | WAITING_BIT,
                                           std::_AO_Acq_Rel, std::_AO_Release)) {
@@ -330,26 +339,33 @@ struct InitByteFutex : GuardBase<InitByteFutex<Wait, Wake, GetThreadIDArg>> {
   }
 
   void release_init_byte() {
-    AtomicInt<uint8_t> init_byte(init_byte_address);
     uint8_t old = init_byte.exchange(COMPLETE_BIT, std::_AO_Acq_Rel);
     if (old & WAITING_BIT)
       Wake(static_cast<int*>(this->base_address));
   }
 
   void abort_init_byte() {
-    AtomicInt<uint8_t> init_byte(init_byte_address);
-    this->clear_thread_id();
+    if (has_thread_id_support) {
+      thread_id.store(0, std::_AO_Relaxed);
+    }
     uint8_t old = init_byte.exchange(0, std::_AO_Acq_Rel);
     if (old & WAITING_BIT)
       Wake(static_cast<int*>(this->base_address));
   }
 
 private:
+  AtomicInt<uint8_t> init_byte;
+  AtomicInt<uint32_t> thread_id;
+  const bool has_thread_id_support;
+  LazyValue<uint32_t, GetThreadIDArg> current_thread_id;
+
   static int byte_to_int_val(uint8_t b) {
     int dest_val = {};
     std::memcpy(reinterpret_cast<char*>(&dest_val) + 1, &b, 1);
     return dest_val;
   }
+
+  static_assert(Wait != nullptr && Wake != nullptr, "");
 };
 
 //===----------------------------------------------------------------------===//

@@ -58,26 +58,24 @@ public:
     GuardType g;
     check_guard<Impl>(&g, []() {});
   }
-
 };
 
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunreachable-code"
-#endif
+template <bool HasFutex = +PlatformFutexWait != nullptr>
+void test_futex() {
+   using TestFutex = SelectImplementation<Implementation::Futex>::type;
+   Tests<uint32_t, TestFutex>::test();
+   Tests<uint64_t, TestFutex>::test();
+}
+template <> void test_futex<false>() {}
+
+
 int main() {
   {
     using TestMutex = SelectImplementation<Implementation::GlobalLock>::type;
     Tests<uint32_t, TestMutex>::test();
     Tests<uint64_t, TestMutex>::test();
   }
-  if (+PlatformFutexWait)
   {
-    using TestFutex = SelectImplementation<Implementation::Futex>::type;
-    Tests<uint32_t, TestFutex>::test();
-    Tests<uint64_t, TestFutex>::test();
+    test_futex();
   }
 }
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
