@@ -146,7 +146,8 @@ int main() {
     static_assert(Implementation::Current == Implementation::GlobalLock, "");
     static_assert(
         std::is_same<CurrentImplementation,
-                     GlobalMutexImpl<LibcppMutex, LibcppCondVar>>::value,
+                     GlobalMutexImpl<LibcppMutex, GlobalStatic<LibcppMutex>::instance,
+                     LibcppCondVar, GlobalStatic<LibcppCondVar>::instance>>::value,
         "");
 #endif
   }
@@ -154,7 +155,7 @@ int main() {
 #ifdef __APPLE__
     assert(PlatformThreadID);
 #endif
-    if (PlatformThreadID) {
+    if (+PlatformThreadID) {
       assert(PlatformThreadID() != 0);
       assert(PlatformThreadID() == PlatformThreadID());
     }

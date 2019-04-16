@@ -208,7 +208,7 @@ struct NoThreadsImpl : GuardImplBase<NoThreadsImpl> {
 };
 
 template <class Mutex, Mutex& global_mutex, class CondVar, CondVar& global_cond,
-          uint32_t (*GetThreadIDArg)()>
+          uint32_t (*GetThreadIDArg)() = PlatformThreadID>
 struct GlobalMutexImpl
     : GuardImplBase<GlobalMutexImpl<Mutex, global_mutex, CondVar, global_cond,
                                     GetThreadIDArg>> {
@@ -284,7 +284,7 @@ struct GlobalMutexImpl
 };
 
 template <void (*Wait)(int*, int), void (*Wake)(int*),
-          uint32_t (*GetThreadIDArg)()>
+          uint32_t (*GetThreadIDArg)() = PlatformThreadID>
 struct FutexImpl : GuardImplBase<FutexImpl<Wait, Wake, GetThreadIDArg>> {
   using BaseT = GuardImplBase<FutexImpl>;
   using BaseT::BaseT;
@@ -298,7 +298,7 @@ struct FutexImpl : GuardImplBase<FutexImpl<Wait, Wake, GetThreadIDArg>> {
       uint8_t last_val = 0;
       if (init_byte.compare_exchange(&last_val, INIT_PENDING_BIT,
                                      std::_AO_Acq_Rel, std::_AO_Acquire)) {
-        this->set_thread_id();
+        this->store_thread_id();
         return INIT_IS_PENDING;
       } else if (last_val == INIT_COMPLETE_BIT) {
         return INIT_IS_DONE;
