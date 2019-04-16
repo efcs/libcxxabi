@@ -1,3 +1,10 @@
+//===----------------------------------------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
 #ifndef LIBCXXABI_SRC_INCLUDE_CXA_GUARD_IMPL_H
 #define LIBCXXABI_SRC_INCLUDE_CXA_GUARD_IMPL_H
 
@@ -22,28 +29,6 @@ namespace __cxxabiv1 {
 
 namespace {
 
-enum class ABI {
-  Itanium,
-  ARM,
-};
-
-enum class Implementation { NoThreads, GlobalLock, Futex };
-
-constexpr ABI CurrentABI =
-#ifdef __arm__
-    ABI::ARM;
-#else
-    ABI::Itanium;
-#endif
-
-constexpr Implementation CurrentImplementation =
-#if defined(_LIBCXXABI_HAS_NO_THREADS)
-    Implementation::NoThreads;
-#elif defined(_LIBCXXABI_USE_FUTEX)
-    Implementation::Futex;
-#else
-        Implementation::GlobalLock;
-#endif
 
 enum class AcquireResult {
   INIT_IS_DONE,
@@ -66,6 +51,9 @@ uint32_t PlatformThreadID() {
 #else
 constexpr uint32_t (*PlatformThreadID)() = nullptr;
 #endif
+
+//===----------------------------------------------------------------------===//
+
 
 static constexpr uint8_t COMPLETE_BIT = (1 << 0);
 static constexpr uint8_t PENDING_BIT = (1 << 1);
@@ -151,6 +139,10 @@ private:
   Derived* derived() { return static_cast<Derived*>(this); }
 };
 
+//===----------------------------------------------------------------------===//
+//
+//===----------------------------------------------------------------------===//
+
 struct InitByteNoThreads : GuardBase<InitByteNoThreads> {
   using GuardBase::GuardBase;
 
@@ -166,6 +158,10 @@ struct InitByteNoThreads : GuardBase<InitByteNoThreads> {
   void release_init_byte() { *init_byte_address = COMPLETE_BIT; }
   void abort_init_byte() { *init_byte_address = 0; }
 };
+
+//===----------------------------------------------------------------------===//
+//
+//===----------------------------------------------------------------------===//
 
 struct LibcppMutex;
 struct LibcppCondVar;
@@ -279,6 +275,10 @@ private:
   };
 };
 
+//===----------------------------------------------------------------------===//
+//
+//===----------------------------------------------------------------------===//
+
 #if defined(SYS_futex)
 void PlatformFutexWait(int* addr, int expect) {
   constexpr int WAIT = 0;
@@ -352,12 +352,31 @@ private:
   }
 };
 
+//===----------------------------------------------------------------------===//
+//
+//===----------------------------------------------------------------------===//
+
 template <class T>
 struct GlobalStatic {
   static T instance;
 };
 template <class T>
 _LIBCPP_SAFE_STATIC T GlobalStatic<T>::instance = {};
+
+enum class Implementation {
+  NoThreads,
+  GlobalLock,
+  Futex
+};
+
+constexpr Implementation CurrentImplementation =
+#if defined(_LIBCXXABI_HAS_NO_THREADS)
+    Implementation::NoThreads;
+#elif defined(_LIBCXXABI_USE_FUTEX)
+    Implementation::Futex;
+#else
+   Implementation::GlobalLock;
+#endif
 
 template <Implementation Impl>
 struct SelectImplementation;

@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "__cxxabi_config.h"
+#include "cxxabi.h"
 #include "cxa_guard_impl.h"
 
 /*
@@ -21,8 +22,11 @@
 
 namespace __cxxabiv1 {
 
-using guard_type =
-    std::conditional<CurrentABI == ABI::ARM, uint32_t, uint64_t>::type;
+#if defined(_LIBCXXABI_GUARD_ABI_ARM)
+using guard_type = uint32_t;
+#else
+using guard_type = uint64_t;
+#endif
 
 extern "C"
 {

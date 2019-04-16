@@ -1,3 +1,11 @@
+//===----------------------------------------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
 #define ABORT_WITH_MESSAGE(...) __builtin_abort()
 #include "../src/cxa_guard_impl.h"
 
@@ -96,13 +104,6 @@ void NopFutexWake(int*) { assert(false); }
 uint32_t MockGetThreadID() { return 0; }
 
 int main() {
-  {
-#ifdef __arm__
-    static_assert(CurrentABI == ABI::ARM, "");
-#else
-    static_assert(CurrentABI == ABI::Itanium, "");
-#endif
-  }
   {
 #if defined(_LIBCXXABI_HAS_NO_THREADS)
     static_assert(CurrentImplementation == Implementation::NoThreads, "");
