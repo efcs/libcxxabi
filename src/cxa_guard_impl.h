@@ -203,7 +203,8 @@ struct NoThreadsImpl : GuardImplBase<NoThreadsImpl> {
   void abort_init_byte() { *init_byte_address = 0; }
 };
 
-template <class Mutex, Mutex& global_mutex, class CondVar, CondVar& global_cond,
+template <class Mutex, Mutex& global_mutex,
+          class CondVar, CondVar& global_cond,
           uint32_t (*GetThreadIDArg)() = PlatformThreadID>
 struct GlobalMutexImpl
     : GuardImplBase<GlobalMutexImpl<Mutex, global_mutex, CondVar, global_cond,
