@@ -140,8 +140,7 @@ struct GuardImplBase {
 
   void abort() { derived()->abort_init_byte(); }
 
-  Derived* derived() { return static_cast<Derived*>(this); }
-
+public:
   void* const base_address;
   uint8_t* const guard_byte_address;
   uint8_t* const init_byte_address;
@@ -172,6 +171,8 @@ protected:
   }
 
 private:
+  Derived* derived() { return static_cast<Derived*>(this); }
+
   uint32_t current_thread_id() {
     if (check_thread_id && !has_current_thread_id) {
       current_thread_id_cache = Derived::GetThreadID();
