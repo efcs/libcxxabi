@@ -1,6 +1,5 @@
 #define ABORT_WITH_MESSAGE(...) __builtin_abort()
 #include "../src/cxa_guard_impl.h"
-#include <unordered_map>
 
 using namespace __cxxabiv1;
 
@@ -94,9 +93,7 @@ static NopCondVar global_nop_cond = {};
 
 void NopFutexWait(int*, int) { assert(false); }
 void NopFutexWake(int*) { assert(false); }
-
-uint32_t CurThreadID = 0;
-uint32_t MockGetThreadID() { return CurThreadID; }
+uint32_t MockGetThreadID() { return 0; }
 
 int main() {
   {
