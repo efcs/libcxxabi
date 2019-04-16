@@ -8,6 +8,35 @@
 #ifndef LIBCXXABI_SRC_INCLUDE_CXA_GUARD_IMPL_H
 #define LIBCXXABI_SRC_INCLUDE_CXA_GUARD_IMPL_H
 
+/* cxa_guard_impl.h - Implements the C++ runtime support for function local
+ * static guards.
+ * The layout of the guard object is the same across ARM and Itanium.
+ *
+ * The first "guard byte" (which is checked by the compiler) is set only upon
+ * the completion of cxa release.
+ *
+ * The second "init byte" does the rest of the bookkeeping. It tracks if
+ * initialization is complete or pending, and if there are waiting threads.
+ *
+ * If the guard variable is 64-bits and the platforms supplies a 32-bit thread
+ * identifier, it is used to detect recursive initialization. The thread ID of
+ * the thread currently performing initialization is stored in the second word.
+ *
+ *  Guard Object Layout:
+ *  ----------------------------------------------------------------------------------
+ *  |a: guard byte | a+1: init byte | a+2: unused | a+3: unused | a+4: thread-id ... |
+ *  ----------------------------------------------------------------------------------
+ *
+ *  Access Protocol:
+ *    For each implementation the guard byte is checked and set before accessing
+ *    the init byte.
+ *
+ *  Overall Design:
+ *    The implementation was designed to allow each implementation to be tested
+ *    independent of the C++ runtime or platform support.
+ *
+ */
+
 #include "__cxxabi_config.h"
 #include "include/atomic_support.h"
 #include <unistd.h>
@@ -21,14 +50,8 @@
 
 #include <__threading_support>
 
-#define DISALLOW_COPY(T)                                                       \
-  T(T const&) = delete;                                                        \
-  T& operator=(T const&) = delete
-
 namespace __cxxabiv1 {
-
 namespace {
-
 
 enum class AcquireResult {
   INIT_IS_DONE,
@@ -37,24 +60,9 @@ enum class AcquireResult {
 constexpr AcquireResult INIT_IS_DONE = AcquireResult::INIT_IS_DONE;
 constexpr AcquireResult INIT_IS_PENDING = AcquireResult::INIT_IS_PENDING;
 
-#if defined(__APPLE__) && defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
-uint32_t PlatformThreadID() {
-  static_assert(sizeof(mach_port_t) == sizeof(uint32_t), "");
-  return static_cast<uint32_t>(
-      pthread_mach_thread_np(std::__libcpp_thread_get_current_id()));
-}
-#elif defined(SYS_gettid) && defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
-uint32_t PlatformThreadID() {
-  static_assert(sizeof(pid_t) == sizeof(uint32_t), "");
-  return static_cast<uint32_t>(syscall(SYS_gettid));
-}
-#else
-constexpr uint32_t (*PlatformThreadID)() = nullptr;
-#endif
-
-
 //===----------------------------------------------------------------------===//
-
+//                          GuardBase
+//===----------------------------------------------------------------------===//
 
 static constexpr uint8_t COMPLETE_BIT = (1 << 0);
 static constexpr uint8_t PENDING_BIT = (1 << 1);
@@ -111,7 +119,7 @@ private:
 };
 
 //===----------------------------------------------------------------------===//
-//
+//                    Single Threaded Implementation
 //===----------------------------------------------------------------------===//
 
 struct InitByteNoThreads : GuardObject<InitByteNoThreads> {
@@ -129,7 +137,7 @@ struct InitByteNoThreads : GuardObject<InitByteNoThreads> {
 };
 
 //===----------------------------------------------------------------------===//
-//
+//                     Global Mutex Implementation
 //===----------------------------------------------------------------------===//
 
 struct LibcppMutex;
@@ -279,7 +287,7 @@ private:
 };
 
 //===----------------------------------------------------------------------===//
-//
+//                         Futex Implementation
 //===----------------------------------------------------------------------===//
 
 #if defined(SYS_futex)
