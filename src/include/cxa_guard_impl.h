@@ -1,7 +1,6 @@
 #ifndef LIBCXXABI_SRC_INCLUDE_CXA_GUARD_IMPL_H
 #define LIBCXXABI_SRC_INCLUDE_CXA_GUARD_IMPL_H
 
-
 #include "__cxxabi_config.h"
 #include "atomic_support.h"
 #include "atomic_int.h"
@@ -16,20 +15,18 @@
 
 #include <__threading_support>
 
-
-#define DISALLOW_COPY(T) T(T const&) = delete; T& operator=(T const&) = delete
+#define DISALLOW_COPY(T)                                                       \
+  T(T const&) = delete;                                                        \
+  T& operator=(T const&) = delete
 
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 #endif
 
+namespace __cxxabiv1 {
 
-namespace __cxxabiv1
-{
-
-namespace
-{
+namespace {
 
 enum class ABI {
   Itanium,
@@ -61,7 +58,6 @@ enum class AcquireResult {
 constexpr AcquireResult INIT_IS_DONE = AcquireResult::INIT_IS_DONE;
 constexpr AcquireResult INIT_IS_PENDING = AcquireResult::INIT_IS_PENDING;
 
-
 #if defined(__APPLE__) && defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
 uint32_t PlatformThreadID() {
   return pthread_mach_thread_np(std::__libcpp_thread_get_current_id());
@@ -69,19 +65,18 @@ uint32_t PlatformThreadID() {
 #elif defined(SYS_gettid) && defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
 uint32_t PlatformThreadID() {
   static_assert(sizeof(pid_t) == sizeof(uint32_t), "");
-  return static_cast<uint32_t>(
-    static_cast<pid_t>(syscall(SYS_gettid)));
+  return static_cast<uint32_t>(static_cast<pid_t>(syscall(SYS_gettid)));
 }
 #else
 constexpr uint32_t (*PlatformThreadID)() = nullptr;
 #endif
 
 #if defined(SYS_futex)
-void PlatformFutexWait(int *addr, int expect) {
+void PlatformFutexWait(int* addr, int expect) {
   constexpr int WAIT = 0;
   syscall(SYS_futex, addr, WAIT, expect, 0);
 }
-void PlatformFutexWake(int *addr) {
+void PlatformFutexWake(int* addr) {
   constexpr int WAKE = 1;
   syscall(SYS_futex, addr, WAKE, INT_MAX);
 }
@@ -89,7 +84,6 @@ void PlatformFutexWake(int *addr) {
 constexpr void (*PlatformFutexWait)(int*, int) = nullptr;
 constexpr void (*PlatformFutexWake)(int*) = nullptr;
 #endif
-
 
 struct LibcppMutex;
 struct LibcppCondVar;
@@ -99,7 +93,8 @@ struct LibcppMutex {
   LibcppMutex() = default;
   bool lock() { return std::__libcpp_mutex_lock(&mutex); }
   bool unlock() { return std::__libcpp_mutex_unlock(&mutex); }
- private:
+
+private:
   friend struct LibcppCondVar;
   DISALLOW_COPY(LibcppMutex);
   std::__libcpp_mutex_t mutex = _LIBCPP_MUTEX_INITIALIZER;
@@ -107,28 +102,33 @@ struct LibcppMutex {
 
 struct LibcppCondVar {
   LibcppCondVar() = default;
-  bool wait(LibcppMutex &mut) { return std::__libcpp_condvar_wait(&cond, &mut.mutex); }
+  bool wait(LibcppMutex& mut) {
+    return std::__libcpp_condvar_wait(&cond, &mut.mutex);
+  }
   bool broadcast() { return std::__libcpp_condvar_broadcast(&cond); }
- private:
+
+private:
   DISALLOW_COPY(LibcppCondVar);
   std::__libcpp_condvar_t cond = _LIBCPP_CONDVAR_INITIALIZER;
 };
 #endif
 
-
 static constexpr uint8_t INIT_COMPLETE_BIT = 1;
 static constexpr uint8_t INIT_PENDING_BIT = 2;
 static constexpr uint8_t WAITING_BIT = 4;
 
-template <class Derived, uint32_t(*GetThreadID)()>
+template <class Derived>
 struct GuardImplBase {
   GuardImplBase() = delete;
 
-  explicit GuardImplBase(uint32_t *g) : base_address(g), guard_byte_address(
-      reinterpret_cast<uint8_t*>(g)), init_byte_address(reinterpret_cast<uint8_t*>(g) + 1), thread_id_address(nullptr) {}
-  explicit GuardImplBase(uint64_t *g) : base_address(g), guard_byte_address(
-      reinterpret_cast<uint8_t*>(g)), init_byte_address(reinterpret_cast<uint8_t*>(g) + 1),
-                                        thread_id_address(reinterpret_cast<uint32_t*>(g) + 1) {}
+  explicit GuardImplBase(uint32_t* g)
+      : base_address(g), guard_byte_address(reinterpret_cast<uint8_t*>(g)),
+        init_byte_address(reinterpret_cast<uint8_t*>(g) + 1),
+        thread_id_address(nullptr) {}
+  explicit GuardImplBase(uint64_t* g)
+      : base_address(g), guard_byte_address(reinterpret_cast<uint8_t*>(g)),
+        init_byte_address(reinterpret_cast<uint8_t*>(g) + 1),
+        thread_id_address(reinterpret_cast<uint32_t*>(g) + 1) {}
 
   AcquireResult acquire() {
     AtomicInt<uint8_t> guard_byte(guard_byte_address);
@@ -143,11 +143,9 @@ struct GuardImplBase {
     derived()->release_init_byte();
   }
 
-  void abort() {
-    derived()->abort_init_byte();
-  }
+  void abort() { derived()->abort_init_byte(); }
 
-  Derived *derived() { return static_cast<Derived*>(this); }
+  Derived* derived() { return static_cast<Derived*>(this); }
 
   void* const base_address;
   uint8_t* const guard_byte_address;
@@ -155,14 +153,6 @@ struct GuardImplBase {
   uint32_t* const thread_id_address;
 
 protected:
-  uint32_t current_thread_id() {
-    if (check_thread_id && !has_current_thread_id) {
-      current_thread_id_cache = GetThreadID();
-      has_current_thread_id = true;
-    }
-    return current_thread_id_cache;
-  }
-
   void check_thread_id_for_deadlock() {
     if (!check_thread_id)
       return;
@@ -186,16 +176,25 @@ protected:
     thread_id.store(current_thread_id(), std::_AO_Relaxed);
   }
 
-
 private:
-  const bool check_thread_id = thread_id_address && GetThreadID;
+  uint32_t current_thread_id() {
+    if (check_thread_id && !has_current_thread_id) {
+      current_thread_id_cache = Derived::GetThreadID();
+      has_current_thread_id = true;
+    }
+    return current_thread_id_cache;
+  }
+
+  const bool check_thread_id = thread_id_address && Derived::GetThreadID;
   bool has_current_thread_id = false;
   uint32_t current_thread_id_cache = 0;
   DISALLOW_COPY(GuardImplBase);
 };
 
-struct NoThreadsImpl : GuardImplBase<NoThreadsImpl, nullptr> {
+struct NoThreadsImpl : GuardImplBase<NoThreadsImpl> {
   using GuardImplBase::GuardImplBase;
+
+  static constexpr uint32_t (*GetThreadID)() = nullptr;
 
   AcquireResult acquire_init_byte() {
     if (*init_byte_address == INIT_COMPLETE_BIT)
@@ -204,28 +203,26 @@ struct NoThreadsImpl : GuardImplBase<NoThreadsImpl, nullptr> {
     return INIT_IS_PENDING;
   }
 
-  void release_init_byte() {
-    *init_byte_address = INIT_COMPLETE_BIT;
-  }
-
-  void abort_init_byte() {
-    *init_byte_address = 0;
-  }
+  void release_init_byte() { *init_byte_address = INIT_COMPLETE_BIT; }
+  void abort_init_byte() { *init_byte_address = 0; }
 };
 
-template <class Mutex, Mutex &global_mutex, class CondVar, CondVar &global_cond, uint32_t(*GetThreadID)() = PlatformThreadID>
-struct GlobalMutexImpl : GuardImplBase<GlobalMutexImpl<Mutex, global_mutex, CondVar, global_cond, GetThreadID>, GetThreadID > {
-  using BaseT = GuardImplBase<GlobalMutexImpl, GetThreadID>;
+template <class Mutex, Mutex& global_mutex, class CondVar, CondVar& global_cond,
+          uint32_t (*GetThreadIDArg)()>
+struct GlobalMutexImpl
+    : GuardImplBase<GlobalMutexImpl<Mutex, global_mutex, CondVar, global_cond,
+                                    GetThreadIDArg>> {
+  using BaseT = GuardImplBase<GlobalMutexImpl>;
   using BaseT::BaseT;
+
   using BaseT::init_byte_address;
-  using BaseT::clear_thread_id;
-  using BaseT::store_thread_id;
-  using BaseT::check_thread_id_for_deadlock;
+
+  static constexpr uint32_t (*GetThreadID)() = GetThreadIDArg;
 
   AcquireResult acquire_init_byte() {
     LockGuard g("__cxa_guard_acquire");
     if (*init_byte_address & INIT_PENDING_BIT) {
-      check_thread_id_for_deadlock();
+      this->check_thread_id_for_deadlock();
     }
     while (*init_byte_address & INIT_PENDING_BIT) {
       *init_byte_address |= WAITING_BIT;
@@ -233,7 +230,7 @@ struct GlobalMutexImpl : GuardImplBase<GlobalMutexImpl<Mutex, global_mutex, Cond
     }
     if (*init_byte_address)
       return INIT_IS_DONE;
-    store_thread_id();
+    this->store_thread_id();
     *init_byte_address = INIT_PENDING_BIT;
     return INIT_IS_PENDING;
   }
@@ -250,7 +247,7 @@ struct GlobalMutexImpl : GuardImplBase<GlobalMutexImpl<Mutex, global_mutex, Cond
     LockGuard g("__cxa_guard_acquire");
     bool has_waiting = *init_byte_address & WAITING_BIT;
     *init_byte_address = 0;
-    clear_thread_id();
+    this->clear_thread_id();
     if (has_waiting)
       g.release_and_broadcast();
   }
@@ -279,45 +276,46 @@ struct GlobalMutexImpl : GuardImplBase<GlobalMutexImpl<Mutex, global_mutex, Cond
 
     ~LockGuard() { release(); }
 
-   private:
+  private:
     DISALLOW_COPY(LockGuard);
     const char* const calling_func;
     bool locked;
   };
 };
 
-
-
-template <void(*Wait)(int*, int), void (*Wake)(int*), uint32_t(*GetThreadID)() = PlatformThreadID>
-struct FutexImpl : GuardImplBase<FutexImpl<Wait, Wake, GetThreadID>, GetThreadID > {
-  using BaseT = GuardImplBase<FutexImpl, GetThreadID>;
+template <void (*Wait)(int*, int), void (*Wake)(int*),
+          uint32_t (*GetThreadIDArg)()>
+struct FutexImpl : GuardImplBase<FutexImpl<Wait, Wake, GetThreadIDArg>> {
+  using BaseT = GuardImplBase<FutexImpl>;
   using BaseT::BaseT;
-  using BaseT::base_address;
   using BaseT::init_byte_address;
-  using BaseT::clear_thread_id;
-  using BaseT::set_thread_id;
-  using BaseT::check_thread_id_for_deadlock;
+
+  static constexpr uint32_t (*GetThreadID)() = GetThreadIDArg;
 
   AcquireResult acquire_init_byte() {
     AtomicInt<uint8_t> init_byte(init_byte_address);
     while (true) {
       uint8_t last_val = 0;
-      if (init_byte.compare_exchange(&last_val, INIT_PENDING_BIT, std::_AO_Acq_Rel, std::_AO_Acquire)) {
-        set_thread_id();
+      if (init_byte.compare_exchange(&last_val, INIT_PENDING_BIT,
+                                     std::_AO_Acq_Rel, std::_AO_Acquire)) {
+        this->set_thread_id();
         return INIT_IS_PENDING;
       } else if (last_val == INIT_COMPLETE_BIT) {
         return INIT_IS_DONE;
       } else if (last_val & INIT_PENDING_BIT) {
-        check_thread_id_for_deadlock();
+        this->check_thread_id_for_deadlock();
         if ((last_val & WAITING_BIT) == 0) {
-          if (!init_byte.compare_exchange(&last_val, INIT_PENDING_BIT | WAITING_BIT, std::_AO_Acq_Rel, std::_AO_Release)) {
+          if (!init_byte.compare_exchange(&last_val,
+                                          INIT_PENDING_BIT | WAITING_BIT,
+                                          std::_AO_Acq_Rel, std::_AO_Release)) {
             if (last_val == INIT_COMPLETE_BIT)
               return INIT_IS_DONE;
             if (last_val == 0)
               continue;
           }
         }
-        Wait(static_cast<int*>(base_address), byte_to_int_val(INIT_PENDING_BIT | WAITING_BIT));
+        Wait(static_cast<int*>(this->base_address),
+             byte_to_int_val(INIT_PENDING_BIT | WAITING_BIT));
       }
     }
   }
@@ -326,15 +324,15 @@ struct FutexImpl : GuardImplBase<FutexImpl<Wait, Wake, GetThreadID>, GetThreadID
     AtomicInt<uint8_t> init_byte(init_byte_address);
     uint8_t old = init_byte.exchange(INIT_COMPLETE_BIT, std::_AO_Acq_Rel);
     if (old & WAITING_BIT)
-      Wake(static_cast<int*>(base_address));
+      Wake(static_cast<int*>(this->base_address));
   }
 
   void abort_init_byte() {
     AtomicInt<uint8_t> init_byte(init_byte_address);
-    clear_thread_id();
+    this->clear_thread_id();
     uint8_t old = init_byte.exchange(0, std::_AO_Acq_Rel);
     if (old & WAITING_BIT)
-      Wake(static_cast<int*>(base_address));
+      Wake(static_cast<int*>(this->base_address));
   }
 
 private:
@@ -353,7 +351,6 @@ struct ChooseImplementation<Implementation::NoThreads> {
   using type = NoThreadsImpl;
 };
 
-
 template <class T>
 struct GlobalStatic {
   static T instance;
@@ -363,16 +360,20 @@ _LIBCPP_SAFE_STATIC T GlobalStatic<T>::instance = {};
 
 template <>
 struct ChooseImplementation<Implementation::GlobalLock> {
-  using type = GlobalMutexImpl<LibcppMutex, GlobalStatic<LibcppMutex>::instance, LibcppCondVar, GlobalStatic<LibcppCondVar>::instance >;
+  using type =
+      GlobalMutexImpl<LibcppMutex, GlobalStatic<LibcppMutex>::instance,
+                      LibcppCondVar, GlobalStatic<LibcppCondVar>::instance,
+                      PlatformThreadID>;
 };
 
 template <>
 struct ChooseImplementation<Implementation::Futex> {
-  using type = FutexImpl<PlatformFutexWait, PlatformFutexWake>;
+  using type =
+      FutexImpl<PlatformFutexWait, PlatformFutexWake, PlatformThreadID>;
 };
 
-using CurrentImplementation =  ChooseImplementation<Implementation::Current>::type;
-
+using CurrentImplementation =
+    ChooseImplementation<Implementation::Current>::type;
 
 } // end namespace
 } // end namespace __cxxabiv1

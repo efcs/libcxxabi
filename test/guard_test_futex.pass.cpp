@@ -4,7 +4,6 @@
 
 using namespace __cxxabiv1;
 
-
 #if 0
 enum InitResult {
   COMPLETE,
@@ -44,7 +43,7 @@ private:
   Tests() : g{}, impl(&g) {}
   GuardType g;
   Impl impl;
-  
+
   uint8_t first_byte() {
     uint8_t first = {};
     std::memcpy(&first, &g, 1);
@@ -52,6 +51,7 @@ private:
   }
 
   void reset() { g = {}; }
+
 public:
   static void test() {
     Tests tests;
@@ -75,7 +75,7 @@ public:
       assert(first_byte() == 1);
       assert(impl.acquire() == INIT_IS_DONE);
     }
-  }      
+  }
   void test_release() {
     {
       reset();
@@ -101,21 +101,26 @@ public:
 };
 
 struct NopMutex {
-  bool lock() { assert(!is_locked); is_locked = true; return false; }
-  bool unlock() { assert(is_locked); is_locked = false; return false; }
+  bool lock() {
+    assert(!is_locked);
+    is_locked = true;
+    return false;
+  }
+  bool unlock() {
+    assert(is_locked);
+    is_locked = false;
+    return false;
+  }
+
 private:
-  bool is_locked = false; 
+  bool is_locked = false;
 };
 struct NopCondVar {
   bool broadcast() { return false; }
   bool wait(NopMutex&) { return false; }
 };
-void NopFutexWait(int*, int) {
-  assert(false);
-}
-void NopFutexWake(int*) {
-  assert(false);
-}
+void NopFutexWait(int*, int) { assert(false); }
+void NopFutexWake(int*) { assert(false); }
 
 int main() {
   {

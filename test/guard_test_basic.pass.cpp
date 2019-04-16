@@ -4,7 +4,6 @@
 
 using namespace __cxxabiv1;
 
-
 #if 0
 enum InitResult {
   COMPLETE,
@@ -44,7 +43,7 @@ private:
   Tests() : g{}, impl(&g) {}
   GuardType g;
   Impl impl;
-  
+
   uint8_t first_byte() {
     uint8_t first = {};
     std::memcpy(&first, &g, 1);
@@ -52,6 +51,7 @@ private:
   }
 
   void reset() { g = {}; }
+
 public:
   static void test() {
     Tests tests;
@@ -75,7 +75,7 @@ public:
       assert(first_byte() == 1);
       assert(impl.acquire() == INIT_IS_DONE);
     }
-  }      
+  }
   void test_release() {
     {
       reset();
@@ -101,10 +101,19 @@ public:
 };
 
 struct NopMutex {
-  bool lock() { assert(!is_locked); is_locked = true; return false; }
-  bool unlock() { assert(is_locked); is_locked = false; return false; }
+  bool lock() {
+    assert(!is_locked);
+    is_locked = true;
+    return false;
+  }
+  bool unlock() {
+    assert(is_locked);
+    is_locked = false;
+    return false;
+  }
+
 private:
-  bool is_locked = false; 
+  bool is_locked = false;
 };
 static NopMutex global_nop_mutex = {};
 
@@ -114,16 +123,11 @@ struct NopCondVar {
 };
 static NopCondVar global_nop_cond = {};
 
-void NopFutexWait(int*, int) {
-  assert(false);
-}
-void NopFutexWake(int*) {
-  assert(false);
-}
+void NopFutexWait(int*, int) { assert(false); }
+void NopFutexWake(int*) { assert(false); }
 
 uint32_t CurThreadID = 0;
 uint32_t MockGetThreadID() { return CurThreadID; }
-
 
 int main() {
   {
@@ -136,10 +140,14 @@ int main() {
   {
 #if defined(_LIBCXXABI_HAS_NO_THREADS)
     static_assert(Implementation::Current == Implementation::NoThreads, "");
-    static_assert(std::is_same<CurrentImplementation, NoThreadsImpl>::value, "");
+    static_assert(std::is_same<CurrentImplementation, NoThreadsImpl>::value,
+                  "");
 #else
     static_assert(Implementation::Current == Implementation::GlobalLock, "");
-    static_assert(std::is_same<CurrentImplementation, GlobalMutexImpl<LibcppMutex, LibcppCondVar>>::value, "");
+    static_assert(
+        std::is_same<CurrentImplementation,
+                     GlobalMutexImpl<LibcppMutex, LibcppCondVar>>::value,
+        "");
 #endif
   }
   {
@@ -156,12 +164,14 @@ int main() {
     Tests<uint64_t, NoThreadsImpl>::test();
   }
   {
-    using MutexImpl = GlobalMutexImpl<NopMutex, global_nop_mutex, NopCondVar, global_nop_cond, MockGetThreadID>;
+    using MutexImpl = GlobalMutexImpl<NopMutex, global_nop_mutex, NopCondVar,
+                                      global_nop_cond, MockGetThreadID>;
     Tests<uint32_t, MutexImpl>::test();
     Tests<uint64_t, MutexImpl>::test();
   }
   {
-    using FutexImpl = ::FutexImpl<&NopFutexWait, &NopFutexWake, &MockGetThreadID>;
+    using FutexImpl =
+        ::FutexImpl<&NopFutexWait, &NopFutexWake, &MockGetThreadID>;
     Tests<uint32_t, FutexImpl>::test();
     Tests<uint64_t, FutexImpl>::test();
   }
