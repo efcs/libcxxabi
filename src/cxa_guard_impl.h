@@ -304,17 +304,19 @@ template <void (*Wait)(int*, int) = PlatformFutexWait,
 struct InitByteFutex : GuardObject<InitByteFutex<Wait, Wake, GetThreadIDArg>> {
   using BaseT = GuardObject<InitByteFutex>;
 
+  /// ARM Constructor
   explicit InitByteFutex(uint32_t *g) : BaseT(g),
     init_byte(this->init_byte_address),
     has_thread_id_support(this->thread_id_address && GetThreadIDArg),
     thread_id(this->thread_id_address) {}
 
+  /// Itanium Constructor
   explicit InitByteFutex(uint64_t *g) : BaseT(g),
     init_byte(this->init_byte_address),
     has_thread_id_support(this->thread_id_address && GetThreadIDArg),
     thread_id(this->thread_id_address) {}
 
-
+public:
   AcquireResult acquire_init_byte() {
     while (true) {
       uint8_t last_val = 0;
