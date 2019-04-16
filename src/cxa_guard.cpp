@@ -26,7 +26,6 @@ using guard_type =
 
 extern "C"
 {
-
 _LIBCXXABI_FUNC_VIS int __cxa_guard_acquire(guard_type* raw_guard_object) {
   SelectedImplementation imp(raw_guard_object);
   return static_cast<int>(imp.acquire());
