@@ -5,6 +5,9 @@
 #include "__cxxabi_config.h"
 #include "atomic_support.h"
 #include "atomic_int.h"
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
 
 #ifndef ABORT_WITH_MESSAGE
 #include "../abort_message.h"
@@ -15,6 +18,11 @@
 
 
 #define DISALLOW_COPY(T) T(T const&) = delete; T& operator=(T const&) = delete
+
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
 
 
 namespace __cxxabiv1
@@ -30,19 +38,6 @@ enum class ABI {
   Current = ARM
 #else
   Current = Itanium
-#endif
-};
-
-enum class Platform {
-  Apple,
-  Linux,
-  Other,
-#ifdef __APPLE__
-  Current = Apple
-#elif defined(__linux__)
-  Current = Linux
-#else
-  Current = Other
 #endif
 };
 
@@ -66,11 +61,6 @@ enum class AcquireResult {
 constexpr AcquireResult INIT_IS_DONE = AcquireResult::INIT_IS_DONE;
 constexpr AcquireResult INIT_IS_PENDING = AcquireResult::INIT_IS_PENDING;
 
-namespace Unimplemented {
-  constexpr uint32_t (*PlatformThreadID)() = nullptr;
-  constexpr void (*PlatformFutexWait)(int*, int) = nullptr;
-  constexpr void (*PlatformFutexWake)(int*) = nullptr;
-}
 
 #if defined(__APPLE__) && defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
 uint32_t PlatformThreadID() {
@@ -78,10 +68,12 @@ uint32_t PlatformThreadID() {
 }
 #elif defined(SYS_gettid) && defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
 uint32_t PlatformThreadID() {
-  return syscall(SYS_gettid);
+  static_assert(sizeof(pid_t) == sizeof(uint32_t), "");
+  return static_cast<uint32_t>(
+    static_cast<pid_t>(syscall(SYS_gettid)));
 }
 #else
-using Unimplemented::PlatformThreadID;
+constexpr uint32_t (*PlatformThreadID)() = nullptr;
 #endif
 
 #if defined(SYS_futex)
@@ -94,9 +86,10 @@ void PlatformFutexWake(int *addr) {
   syscall(SYS_futex, addr, WAKE, INT_MAX);
 }
 #else
-using Unimplemented::PlatformFutexWake;
-using Unimplemented::PlatformFutexWait;
+constexpr void (*PlatformFutexWait)(int*, int) = nullptr;
+constexpr void (*PlatformFutexWake)(int*) = nullptr;
 #endif
+
 
 struct LibcppMutex;
 struct LibcppCondVar;
@@ -127,7 +120,7 @@ static constexpr uint8_t INIT_COMPLETE_BIT = 1;
 static constexpr uint8_t INIT_PENDING_BIT = 2;
 static constexpr uint8_t WAITING_BIT = 4;
 
-template <class Derived>
+template <class Derived, uint32_t(*GetThreadID)()>
 struct GuardImplBase {
   GuardImplBase() = delete;
 
@@ -156,17 +149,52 @@ struct GuardImplBase {
 
   Derived *derived() { return static_cast<Derived*>(this); }
 
- protected:
-  void *base_address;
-  uint8_t *guard_byte_address;
-  uint8_t *init_byte_address;
-  uint32_t *thread_id_address;
+  void* const base_address;
+  uint8_t* const guard_byte_address;
+  uint8_t* const init_byte_address;
+  uint32_t* const thread_id_address;
 
- private:
+protected:
+  uint32_t current_thread_id() {
+    if (check_thread_id && !has_current_thread_id) {
+      current_thread_id_cache = GetThreadID();
+      has_current_thread_id = true;
+    }
+    return current_thread_id_cache;
+  }
+
+  void check_thread_id_for_deadlock() {
+    if (!check_thread_id)
+      return;
+    AtomicInt<uint32_t> thread_id(thread_id_address);
+    if (thread_id.load(std::_AO_Relaxed) == current_thread_id()) {
+      ABORT_WITH_MESSAGE("__cxa_guard_acquire detected deadlock");
+    }
+  }
+
+  void clear_thread_id() {
+    if (!check_thread_id)
+      return;
+    AtomicInt<uint32_t> thread_id(thread_id_address);
+    thread_id.store(0, std::_AO_Relaxed);
+  }
+
+  void store_thread_id() {
+    if (!check_thread_id)
+      return;
+    AtomicInt<uint32_t> thread_id(thread_id_address);
+    thread_id.store(current_thread_id(), std::_AO_Relaxed);
+  }
+
+
+private:
+  const bool check_thread_id = thread_id_address && GetThreadID;
+  bool has_current_thread_id = false;
+  uint32_t current_thread_id_cache = 0;
   DISALLOW_COPY(GuardImplBase);
 };
 
-struct NoThreadsImpl : GuardImplBase<NoThreadsImpl> {
+struct NoThreadsImpl : GuardImplBase<NoThreadsImpl, nullptr> {
   using GuardImplBase::GuardImplBase;
 
   AcquireResult acquire_init_byte() {
@@ -185,20 +213,27 @@ struct NoThreadsImpl : GuardImplBase<NoThreadsImpl> {
   }
 };
 
-template <class Mutex, class CondVar>
-struct GlobalMutexImpl : GuardImplBase<GlobalMutexImpl<Mutex, CondVar> > {
-  using BaseT = GuardImplBase<GlobalMutexImpl>;
+template <class Mutex, Mutex &global_mutex, class CondVar, CondVar &global_cond, uint32_t(*GetThreadID)() = PlatformThreadID>
+struct GlobalMutexImpl : GuardImplBase<GlobalMutexImpl<Mutex, global_mutex, CondVar, global_cond, GetThreadID>, GetThreadID > {
+  using BaseT = GuardImplBase<GlobalMutexImpl, GetThreadID>;
   using BaseT::BaseT;
   using BaseT::init_byte_address;
+  using BaseT::clear_thread_id;
+  using BaseT::store_thread_id;
+  using BaseT::check_thread_id_for_deadlock;
 
   AcquireResult acquire_init_byte() {
     LockGuard g("__cxa_guard_acquire");
+    if (*init_byte_address & INIT_PENDING_BIT) {
+      check_thread_id_for_deadlock();
+    }
     while (*init_byte_address & INIT_PENDING_BIT) {
       *init_byte_address |= WAITING_BIT;
       global_cond.wait(global_mutex);
     }
     if (*init_byte_address)
       return INIT_IS_DONE;
+    store_thread_id();
     *init_byte_address = INIT_PENDING_BIT;
     return INIT_IS_PENDING;
   }
@@ -215,6 +250,7 @@ struct GlobalMutexImpl : GuardImplBase<GlobalMutexImpl<Mutex, CondVar> > {
     LockGuard g("__cxa_guard_acquire");
     bool has_waiting = *init_byte_address & WAITING_BIT;
     *init_byte_address = 0;
+    clear_thread_id();
     if (has_waiting)
       g.release_and_broadcast();
   }
@@ -248,32 +284,31 @@ struct GlobalMutexImpl : GuardImplBase<GlobalMutexImpl<Mutex, CondVar> > {
     const char* const calling_func;
     bool locked;
   };
-
-  static Mutex global_mutex;
-  static CondVar global_cond;
 };
-template <class Mutex, class Cond>
-_LIBCPP_SAFE_STATIC Mutex GlobalMutexImpl<Mutex, Cond>::global_mutex;
-template <class Mutex, class Cond>
-_LIBCPP_SAFE_STATIC Cond GlobalMutexImpl<Mutex, Cond>::global_cond;
 
 
-template <void(*Wait)(int*, int), void (*Wake)(int*)>
-struct FutexImpl : GuardImplBase<FutexImpl<Wait, Wake> > {
-  using BaseT = GuardImplBase<FutexImpl>;
+
+template <void(*Wait)(int*, int), void (*Wake)(int*), uint32_t(*GetThreadID)() = PlatformThreadID>
+struct FutexImpl : GuardImplBase<FutexImpl<Wait, Wake, GetThreadID>, GetThreadID > {
+  using BaseT = GuardImplBase<FutexImpl, GetThreadID>;
   using BaseT::BaseT;
   using BaseT::base_address;
   using BaseT::init_byte_address;
+  using BaseT::clear_thread_id;
+  using BaseT::set_thread_id;
+  using BaseT::check_thread_id_for_deadlock;
 
   AcquireResult acquire_init_byte() {
     AtomicInt<uint8_t> init_byte(init_byte_address);
     while (true) {
       uint8_t last_val = 0;
       if (init_byte.compare_exchange(&last_val, INIT_PENDING_BIT, std::_AO_Acq_Rel, std::_AO_Acquire)) {
+        set_thread_id();
         return INIT_IS_PENDING;
       } else if (last_val == INIT_COMPLETE_BIT) {
         return INIT_IS_DONE;
       } else if (last_val & INIT_PENDING_BIT) {
+        check_thread_id_for_deadlock();
         if ((last_val & WAITING_BIT) == 0) {
           if (!init_byte.compare_exchange(&last_val, INIT_PENDING_BIT | WAITING_BIT, std::_AO_Acq_Rel, std::_AO_Release)) {
             if (last_val == INIT_COMPLETE_BIT)
@@ -296,13 +331,13 @@ struct FutexImpl : GuardImplBase<FutexImpl<Wait, Wake> > {
 
   void abort_init_byte() {
     AtomicInt<uint8_t> init_byte(init_byte_address);
+    clear_thread_id();
     uint8_t old = init_byte.exchange(0, std::_AO_Acq_Rel);
     if (old & WAITING_BIT)
       Wake(static_cast<int*>(base_address));
   }
 
 private:
-
   static int byte_to_int_val(uint8_t b) {
     int dest_val = {};
     std::memcpy(reinterpret_cast<char*>(&dest_val) + 1, &b, 1);
@@ -318,9 +353,17 @@ struct ChooseImplementation<Implementation::NoThreads> {
   using type = NoThreadsImpl;
 };
 
+
+template <class T>
+struct GlobalStatic {
+  static T instance;
+};
+template <class T>
+_LIBCPP_SAFE_STATIC T GlobalStatic<T>::instance = {};
+
 template <>
 struct ChooseImplementation<Implementation::GlobalLock> {
-  using type = GlobalMutexImpl<LibcppMutex, LibcppCondVar>;
+  using type = GlobalMutexImpl<LibcppMutex, GlobalStatic<LibcppMutex>::instance, LibcppCondVar, GlobalStatic<LibcppCondVar>::instance >;
 };
 
 template <>

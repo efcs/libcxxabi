@@ -106,10 +106,14 @@ struct NopMutex {
 private:
   bool is_locked = false; 
 };
+static NopMutex global_nop_mutex = {};
+
 struct NopCondVar {
   bool broadcast() { return false; }
   bool wait(NopMutex&) { return false; }
 };
+static NopCondVar global_nop_cond = {};
+
 void NopFutexWait(int*, int) {
   assert(false);
 }
@@ -117,18 +121,47 @@ void NopFutexWake(int*) {
   assert(false);
 }
 
+uint32_t CurThreadID = 0;
+uint32_t MockGetThreadID() { return CurThreadID; }
+
+
 int main() {
+  {
+#ifdef __arm__
+    static_assert(ABI::Current == ABI::ARM, "");
+#else
+    static_assert(ABI::Current == ABI::Itanium, "");
+#endif
+  }
+  {
+#if defined(_LIBCXXABI_HAS_NO_THREADS)
+    static_assert(Implementation::Current == Implementation::NoThreads, "");
+    static_assert(std::is_same<CurrentImplementation, NoThreadsImpl>::value, "");
+#else
+    static_assert(Implementation::Current == Implementation::GlobalLock, "");
+    static_assert(std::is_same<CurrentImplementation, GlobalMutexImpl<LibcppMutex, LibcppCondVar>>::value, "");
+#endif
+  }
+  {
+#ifdef __APPLE__
+    assert(PlatformThreadID);
+#endif
+    if (PlatformThreadID) {
+      assert(PlatformThreadID() != 0);
+      assert(PlatformThreadID() == PlatformThreadID());
+    }
+  }
   {
     Tests<uint32_t, NoThreadsImpl>::test();
     Tests<uint64_t, NoThreadsImpl>::test();
   }
   {
-    using MutexImpl = GlobalMutexImpl<NopMutex, NopCondVar>;
+    using MutexImpl = GlobalMutexImpl<NopMutex, global_nop_mutex, NopCondVar, global_nop_cond, MockGetThreadID>;
     Tests<uint32_t, MutexImpl>::test();
     Tests<uint64_t, MutexImpl>::test();
   }
   {
-    using FutexImpl = ::FutexImpl<&NopFutexWait, &NopFutexWake>;
+    using FutexImpl = ::FutexImpl<&NopFutexWait, &NopFutexWake, &MockGetThreadID>;
     Tests<uint32_t, FutexImpl>::test();
     Tests<uint64_t, FutexImpl>::test();
   }
