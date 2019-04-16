@@ -38,16 +38,16 @@ public:
     {
       reset();
       assert(first_byte() == 0);
-      assert(impl.acquire() == INIT_IS_PENDING);
+      assert(impl.cxa_guard_acquire() == INIT_IS_PENDING);
       assert(first_byte() == 0);
     }
     {
       reset();
       assert(first_byte() == 0);
-      assert(impl.acquire() == INIT_IS_PENDING);
-      impl.release();
+      assert(impl.cxa_guard_acquire() == INIT_IS_PENDING);
+      impl.cxa_guard_release();
       assert(first_byte() == 1);
-      assert(impl.acquire() == INIT_IS_DONE);
+      assert(impl.cxa_guard_acquire() == INIT_IS_DONE);
     }
   }
 
@@ -55,9 +55,9 @@ public:
     {
       reset();
       assert(first_byte() == 0);
-      assert(impl.acquire() == INIT_IS_PENDING);
+      assert(impl.cxa_guard_acquire() == INIT_IS_PENDING);
       assert(first_byte() == 0);
-      impl.release();
+      impl.cxa_guard_release();
       assert(first_byte() == 1);
     }
   }
@@ -66,11 +66,11 @@ public:
     {
       reset();
       assert(first_byte() == 0);
-      assert(impl.acquire() == INIT_IS_PENDING);
+      assert(impl.cxa_guard_acquire() == INIT_IS_PENDING);
       assert(first_byte() == 0);
-      impl.abort();
+      impl.cxa_guard_abort();
       assert(first_byte() == 0);
-      assert(impl.acquire() == INIT_IS_PENDING);
+      assert(impl.cxa_guard_acquire() == INIT_IS_PENDING);
       assert(first_byte() == 0);
     }
   }

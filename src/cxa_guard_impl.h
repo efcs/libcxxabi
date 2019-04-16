@@ -61,41 +61,49 @@ static constexpr uint8_t PENDING_BIT = (1 << 1);
 static constexpr uint8_t WAITING_BIT = (1 << 2);
 
 template <class Derived>
-struct GuardBase {
-  GuardBase() = delete;
-  GuardBase(GuardBase const&) = delete;
-  GuardBase& operator=(GuardBase const&) = delete;
+struct GuardObject {
+  GuardObject() = delete;
+  GuardObject(GuardObject const&) = delete;
+  GuardObject& operator=(GuardObject const&) = delete;
 
-  explicit GuardBase(uint32_t* g)
+  explicit GuardObject(uint32_t* g)
       : base_address(g), guard_byte_address(reinterpret_cast<uint8_t*>(g)),
         init_byte_address(reinterpret_cast<uint8_t*>(g) + 1),
         thread_id_address(nullptr) {}
 
-  explicit GuardBase(uint64_t* g)
+  explicit GuardObject(uint64_t* g)
       : base_address(g), guard_byte_address(reinterpret_cast<uint8_t*>(g)),
         init_byte_address(reinterpret_cast<uint8_t*>(g) + 1),
         thread_id_address(reinterpret_cast<uint32_t*>(g) + 1) {}
 
 public:
-  AcquireResult acquire() {
+  /// Implements __cxa_guard_acquire
+  AcquireResult cxa_guard_acquire() {
     AtomicInt<uint8_t> guard_byte(guard_byte_address);
     if (guard_byte.load(std::_AO_Acquire) == COMPLETE_BIT)
       return INIT_IS_DONE;
     return derived()->acquire_init_byte();
   }
 
-  void release() {
+  /// Implements __cxa_guard_release
+  void cxa_guard_release() {
     AtomicInt<uint8_t> guard_byte(guard_byte_address);
     guard_byte.store(COMPLETE_BIT, std::_AO_Release);
     derived()->release_init_byte();
   }
 
-  void abort() { derived()->abort_init_byte(); }
+  /// Implements __cxa_guard_abort
+  void cxa_guard_abort() { derived()->abort_init_byte(); }
 
 public:
+  /// base_address - the address of the original guard object.
   void* const base_address;
+  /// The address of the guord byte at offset 0.
   uint8_t* const guard_byte_address;
+  /// The address of the byte used by the implementation during initialization.
   uint8_t* const init_byte_address;
+  /// An optional address storing an identifier for the thread performing initialization.
+  /// It's uned to detect recursive initialization.
   uint32_t* const thread_id_address;
 
 private:
@@ -106,8 +114,8 @@ private:
 //
 //===----------------------------------------------------------------------===//
 
-struct InitByteNoThreads : GuardBase<InitByteNoThreads> {
-  using GuardBase::GuardBase;
+struct InitByteNoThreads : GuardObject<InitByteNoThreads> {
+  using GuardObject::GuardObject;
 
   AcquireResult acquire_init_byte() {
     if (*init_byte_address == COMPLETE_BIT)
@@ -156,6 +164,7 @@ private:
 };
 #endif // !defined(_LIBCXXABI_HAS_NO_THREADS)
 
+
 template <class T, T(*Init)()>
 struct LazyValue {
   LazyValue() : is_init(false) {}
@@ -172,21 +181,14 @@ private:
   bool is_init = false;
 };
 
-
-
 template <class Mutex, class CondVar, Mutex& global_mutex, CondVar& global_cond,
           uint32_t (*GetThreadID)() = PlatformThreadID>
 struct InitByteGlobalMutex
-    : GuardBase<InitByteGlobalMutex<Mutex, CondVar, global_mutex, global_cond,
+    : GuardObject<InitByteGlobalMutex<Mutex, CondVar, global_mutex, global_cond,
                                     GetThreadID>> {
 
-  using BaseT = GuardBase<InitByteGlobalMutex>;
+  using BaseT = GuardObject<InitByteGlobalMutex>;
   using BaseT::BaseT;
-
-  using BaseT::init_byte_address;
-  using BaseT::thread_id_address;
-  const bool has_thread_id_support;
-  LazyValue<uint32_t, GetThreadID> current_thread_id;
 
   explicit InitByteGlobalMutex(uint32_t *g) : BaseT(g), has_thread_id_support(false) {}
   explicit InitByteGlobalMutex(uint64_t *g) : BaseT(g), has_thread_id_support(GetThreadID) {}
@@ -226,13 +228,20 @@ public:
 
   void abort_init_byte() {
     LockGuard g("__cxa_guard_acquire");
+    if (has_thread_id_support)
+      *thread_id_address = 0;
     bool has_waiting = *init_byte_address & WAITING_BIT;
     *init_byte_address = 0;
-    if (thread_id_address && GetThreadID)
-      *thread_id_address = 0;
     if (has_waiting)
       g.release_and_broadcast();
   }
+
+private:
+
+  using BaseT::init_byte_address;
+  using BaseT::thread_id_address;
+  const bool has_thread_id_support;
+  LazyValue<uint32_t, GetThreadID> current_thread_id;
 
 private:
   struct LockGuard {
@@ -287,19 +296,23 @@ constexpr void (*PlatformFutexWait)(int*, int) = nullptr;
 constexpr void (*PlatformFutexWake)(int*) = nullptr;
 #endif
 
+/// InitByteFutex - Manages initialization using atomics and the futex syscall
+/// for waiting and waking.
 template <void (*Wait)(int*, int) = PlatformFutexWait,
           void (*Wake)(int*) = PlatformFutexWake,
           uint32_t (*GetThreadIDArg)() = PlatformThreadID>
-struct InitByteFutex : GuardBase<InitByteFutex<Wait, Wake, GetThreadIDArg>> {
-  using BaseT = GuardBase<InitByteFutex>;
+struct InitByteFutex : GuardObject<InitByteFutex<Wait, Wake, GetThreadIDArg>> {
+  using BaseT = GuardObject<InitByteFutex>;
 
   explicit InitByteFutex(uint32_t *g) : BaseT(g),
-    init_byte(this->init_byte_address), thread_id(this->thread_id_address),
-    has_thread_id_support(this->thread_id_address && GetThreadIDArg) {}
+    init_byte(this->init_byte_address),
+    has_thread_id_support(this->thread_id_address && GetThreadIDArg),
+    thread_id(this->thread_id_address) {}
 
   explicit InitByteFutex(uint64_t *g) : BaseT(g),
-    init_byte(this->init_byte_address), thread_id(this->thread_id_address),
-    has_thread_id_support(this->thread_id_address && GetThreadIDArg) {}
+    init_byte(this->init_byte_address),
+    has_thread_id_support(this->thread_id_address && GetThreadIDArg),
+    thread_id(this->thread_id_address) {}
 
 
   AcquireResult acquire_init_byte() {
@@ -333,7 +346,7 @@ struct InitByteFutex : GuardBase<InitByteFutex<Wait, Wake, GetThreadIDArg>> {
           }
         }
         Wait(static_cast<int*>(this->base_address),
-             byte_to_int_val(PENDING_BIT | WAITING_BIT));
+             expected_value_for_futex(PENDING_BIT | WAITING_BIT));
       }
     }
   }
@@ -345,9 +358,9 @@ struct InitByteFutex : GuardBase<InitByteFutex<Wait, Wake, GetThreadIDArg>> {
   }
 
   void abort_init_byte() {
-    if (has_thread_id_support) {
+    if (has_thread_id_support)
       thread_id.store(0, std::_AO_Relaxed);
-    }
+
     uint8_t old = init_byte.exchange(0, std::_AO_Acq_Rel);
     if (old & WAITING_BIT)
       Wake(static_cast<int*>(this->base_address));
@@ -355,11 +368,16 @@ struct InitByteFutex : GuardBase<InitByteFutex<Wait, Wake, GetThreadIDArg>> {
 
 private:
   AtomicInt<uint8_t> init_byte;
-  AtomicInt<uint32_t> thread_id;
+
   const bool has_thread_id_support;
+  // Unsafe to use unless has_thread_id_support
+  AtomicInt<uint32_t> thread_id;
   LazyValue<uint32_t, GetThreadIDArg> current_thread_id;
 
-  static int byte_to_int_val(uint8_t b) {
+  /// Create the expected integer value for futex `wait(int* addr, int expected)`.
+  /// We pass the base address as the first argument, So this function creates
+  /// an zero-initialized integer  with `b` copied at the correct offset.
+  static int expected_value_for_futex(uint8_t b) {
     int dest_val = {};
     std::memcpy(reinterpret_cast<char*>(&dest_val) + 1, &b, 1);
     return dest_val;

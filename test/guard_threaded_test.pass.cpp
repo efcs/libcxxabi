@@ -28,16 +28,16 @@ InitResult check_guard(GuardType *g, Init init) {
   uint8_t *first_byte = (uint8_t*)g;
   if (std::__libcpp_atomic_load(first_byte, std::_AO_Acquire) == 0) {
     Impl impl(g);
-    if (impl.acquire() == INIT_IS_PENDING) {
+    if (impl.cxa_guard_acquire() == INIT_IS_PENDING) {
 #ifndef LIBCXXABI_HAS_NO_EXCEPTIONS
       try {
 #endif
         init();
-        impl.release();
+        impl.cxa_guard_release();
         return PERFORMED;
 #ifndef LIBCXXABI_HAS_NO_EXCEPTIONS
       } catch (...) {
-        impl.abort();
+        impl.cxa_guard_abort();
         return ABORTED;
       }
 #endif
