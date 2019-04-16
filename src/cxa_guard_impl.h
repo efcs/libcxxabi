@@ -53,16 +53,55 @@
 namespace __cxxabiv1 {
 namespace {
 
+//===----------------------------------------------------------------------===//
+//                          Misc Utilities
+//===----------------------------------------------------------------------===//
+
+template <class T, T(*Init)()>
+struct LazyValue {
+  LazyValue() : is_init(false) {}
+
+  T& get() {
+    if (!is_init) {
+      value = Init();
+      is_init = true;
+    }
+    return value;
+  }
+ private:
+  T value;
+  bool is_init = false;
+};
+
+//===----------------------------------------------------------------------===//
+//                       PlatformGetThreadID
+//===----------------------------------------------------------------------===//
+
+#if defined(__APPLE__) && defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
+uint32_t PlatformThreadID() {
+  static_assert(sizeof(mach_port_t) == sizeof(uint32_t), "");
+  return static_cast<uint32_t>(
+      pthread_mach_thread_np(std::__libcpp_thread_get_current_id()));
+}
+#elif defined(SYS_gettid) && defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
+uint32_t PlatformThreadID() {
+  static_assert(sizeof(pid_t) == sizeof(uint32_t), "");
+  return static_cast<uint32_t>(syscall(SYS_gettid));
+}
+#else
+constexpr uint32_t (*PlatformThreadID)() = nullptr;
+#endif
+
+//===----------------------------------------------------------------------===//
+//                          GuardBase
+//===----------------------------------------------------------------------===//
+
 enum class AcquireResult {
   INIT_IS_DONE,
   INIT_IS_PENDING,
 };
 constexpr AcquireResult INIT_IS_DONE = AcquireResult::INIT_IS_DONE;
 constexpr AcquireResult INIT_IS_PENDING = AcquireResult::INIT_IS_PENDING;
-
-//===----------------------------------------------------------------------===//
-//                          GuardBase
-//===----------------------------------------------------------------------===//
 
 static constexpr uint8_t COMPLETE_BIT = (1 << 0);
 static constexpr uint8_t PENDING_BIT = (1 << 1);
@@ -136,25 +175,6 @@ struct InitByteNoThreads : GuardObject<InitByteNoThreads> {
   void abort_init_byte() { *init_byte_address = 0; }
 };
 
-//===----------------------------------------------------------------------===//
-//                       PlatformGetThreadID
-//===----------------------------------------------------------------------===//
-
-#if defined(__APPLE__) && defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
-uint32_t PlatformThreadID() {
-  static_assert(sizeof(mach_port_t) == sizeof(uint32_t), "");
-  return static_cast<uint32_t>(
-      pthread_mach_thread_np(std::__libcpp_thread_get_current_id()));
-}
-#elif defined(SYS_gettid) && defined(_LIBCPP_HAS_THREAD_API_PTHREAD)
-uint32_t PlatformThreadID() {
-  static_assert(sizeof(pid_t) == sizeof(uint32_t), "");
-  return static_cast<uint32_t>(syscall(SYS_gettid));
-}
-#else
-constexpr uint32_t (*PlatformThreadID)() = nullptr;
-#endif
-
 
 //===----------------------------------------------------------------------===//
 //                     Global Mutex Implementation
@@ -192,22 +212,6 @@ private:
 };
 #endif // !defined(_LIBCXXABI_HAS_NO_THREADS)
 
-
-template <class T, T(*Init)()>
-struct LazyValue {
-  LazyValue() : is_init(false) {}
-
-  T& get() {
-    if (!is_init) {
-      value = Init();
-      is_init = true;
-    }
-    return value;
-  }
-private:
-  T value;
-  bool is_init = false;
-};
 
 template <class Mutex, class CondVar, Mutex& global_mutex, CondVar& global_cond,
           uint32_t (*GetThreadID)() = PlatformThreadID>
