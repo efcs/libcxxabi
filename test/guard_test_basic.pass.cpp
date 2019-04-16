@@ -4,39 +4,6 @@
 
 using namespace __cxxabiv1;
 
-#if 0
-enum InitResult {
-  COMPLETE,
-  PERFORMED,
-  WAITED,
-  ABORTED
-};
-
-template <class Impl, class GuardType, class Init>
-InitResult check_guard(GuardType *g, Init init) {
-  uint8_t *byte = (uint8_t*)g;
-  if (std::__libcpp_atomic_load(g, std::_AO_Acquire) == 0) {
-    Impl impl(g);
-    if (impl.acquire()) {
-#ifndef LIBCXXABI_HAS_NO_EXCEPTIONS
-      try {
-#endif
-        init();
-        impl.release();
-        return PERFORMED;
-#ifndef LIBCXXABI_HAS_NO_EXCEPTIONS
-      } catch (...) {
-        impl.abort();
-        return ABORTED;
-      }
-#endif
-    }
-    return WAITED;
-  }
-  return COMPLETE;
-}
-#endif
-
 template <class GuardType, class Impl>
 struct Tests {
 private:
@@ -76,6 +43,7 @@ public:
       assert(impl.acquire() == INIT_IS_DONE);
     }
   }
+
   void test_release() {
     {
       reset();
@@ -86,6 +54,7 @@ public:
       assert(first_byte() == 1);
     }
   }
+
   void test_abort() {
     {
       reset();
