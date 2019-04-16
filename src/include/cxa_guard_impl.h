@@ -3,7 +3,6 @@
 
 #include "__cxxabi_config.h"
 #include "atomic_support.h"
-#include "atomic_int.h"
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
