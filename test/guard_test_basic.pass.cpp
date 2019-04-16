@@ -98,27 +98,29 @@ uint32_t MockGetThreadID() { return 0; }
 int main() {
   {
 #ifdef __arm__
-    static_assert(ABI::Current == ABI::ARM, "");
+    static_assert(CurrentABI == ABI::ARM, "");
 #else
-    static_assert(ABI::Current == ABI::Itanium, "");
+    static_assert(CurrentABI == ABI::Itanium, "");
 #endif
   }
   {
 #if defined(_LIBCXXABI_HAS_NO_THREADS)
-    static_assert(Implementation::Current == Implementation::NoThreads, "");
-    static_assert(std::is_same<CurrentImplementation, NoThreadsImpl>::value,
-                  "");
-#else
-    static_assert(Implementation::Current == Implementation::GlobalLock, "");
+    static_assert(CurrentImplementation == Implementation::NoThreads, "");
     static_assert(
-        std::is_same<CurrentImplementation,
-                     GlobalMutexImpl<LibcppMutex, GlobalStatic<LibcppMutex>::instance,
-                     LibcppCondVar, GlobalStatic<LibcppCondVar>::instance>>::value,
+        std::is_same<SelectedImplementation, InitByteNoThreads>::value, "");
+#else
+    static_assert(CurrentImplementation == Implementation::GlobalLock, "");
+    static_assert(
+        std::is_same<
+            SelectedImplementation,
+            InitByteGlobalMutex<LibcppMutex, LibcppCondVar,
+                                GlobalStatic<LibcppMutex>::instance,
+                                GlobalStatic<LibcppCondVar>::instance>>::value,
         "");
 #endif
   }
   {
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__linux__)
     assert(PlatformThreadID);
 #endif
     if (+PlatformThreadID) {
@@ -127,18 +129,19 @@ int main() {
     }
   }
   {
-    Tests<uint32_t, NoThreadsImpl>::test();
-    Tests<uint64_t, NoThreadsImpl>::test();
+    Tests<uint32_t, InitByteNoThreads>::test();
+    Tests<uint64_t, InitByteNoThreads>::test();
   }
   {
-    using MutexImpl = GlobalMutexImpl<NopMutex, global_nop_mutex, NopCondVar,
-                                      global_nop_cond, MockGetThreadID>;
+    using MutexImpl =
+        InitByteGlobalMutex<NopMutex, NopCondVar, global_nop_mutex,
+                            global_nop_cond, MockGetThreadID>;
     Tests<uint32_t, MutexImpl>::test();
     Tests<uint64_t, MutexImpl>::test();
   }
   {
     using FutexImpl =
-        ::FutexImpl<&NopFutexWait, &NopFutexWake, &MockGetThreadID>;
+        InitByteFutex<&NopFutexWait, &NopFutexWake, &MockGetThreadID>;
     Tests<uint32_t, FutexImpl>::test();
     Tests<uint64_t, FutexImpl>::test();
   }

@@ -21,23 +21,24 @@
 
 namespace __cxxabiv1 {
 
-using guard_type = std::conditional<ABI::Current == ABI::ARM, uint32_t, uint64_t>::type;
+using guard_type =
+    std::conditional<CurrentABI == ABI::ARM, uint32_t, uint64_t>::type;
 
 extern "C"
 {
 
 _LIBCXXABI_FUNC_VIS int __cxa_guard_acquire(guard_type* raw_guard_object) {
-  CurrentImplementation imp(raw_guard_object);
+  SelectedImplementation imp(raw_guard_object);
   return static_cast<int>(imp.acquire());
 }
 
 _LIBCXXABI_FUNC_VIS void __cxa_guard_release(guard_type *raw_guard_object) {
-  CurrentImplementation imp(raw_guard_object);
+  SelectedImplementation imp(raw_guard_object);
   imp.release();
 }
 
 _LIBCXXABI_FUNC_VIS void __cxa_guard_abort(guard_type *raw_guard_object) {
-  CurrentImplementation imp(raw_guard_object);
+  SelectedImplementation imp(raw_guard_object);
   imp.abort();
 }
 }  // extern "C"
