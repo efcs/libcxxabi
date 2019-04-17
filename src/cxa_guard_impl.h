@@ -23,9 +23,9 @@
  * the thread currently performing initialization is stored in the second word.
  *
  *  Guard Object Layout:
- *  ----------------------------------------------------------------------------------
- *  |a: guard byte | a+1: init byte | a+2: unused | a+3: unused | a+4: thread-id ... |
- *  ----------------------------------------------------------------------------------
+ * -------------------------------------------------------------------------
+ * |a: guard byte | a+1: init byte | a+2 : unused ... | a+4: thread-id ... |
+ * ------------------------------------------------------------------------
  *
  *  Access Protocol:
  *    For each implementation the guard byte is checked and set before accessing
@@ -51,6 +51,10 @@
 #include <__threading_support>
 
 namespace __cxxabiv1 {
+
+// Place everything in an anonymous namespace -- even though we're in a header.
+// This header is only included by cxa_guard.cpp and tests, and it's OK for the
+// tests to have unique definitions of these types.
 namespace {
 
 //===----------------------------------------------------------------------===//
@@ -135,6 +139,8 @@ public:
   /// Implements __cxa_guard_release
   void cxa_guard_release() {
     AtomicInt<uint8_t> guard_byte(guard_byte_address);
+    // Store complete first, so that when release wakes other folks, they see
+    // it as having been completed.
     guard_byte.store(COMPLETE_BIT, std::_AO_Release);
     derived()->release_init_byte();
   }
@@ -167,6 +173,8 @@ struct InitByteNoThreads : GuardObject<InitByteNoThreads> {
   AcquireResult acquire_init_byte() {
     if (*init_byte_address == COMPLETE_BIT)
       return INIT_IS_DONE;
+    if (*init_byte_address & PENDING_BIT)
+      ABORT_WITH_MESSAGE("__cxa_guard_acquire detected recursive initialization");
     *init_byte_address = PENDING_BIT;
     return INIT_IS_PENDING;
   }
@@ -219,7 +227,7 @@ struct InitByteGlobalMutex
     : GuardObject<InitByteGlobalMutex<Mutex, CondVar, global_mutex, global_cond,
                                     GetThreadID>> {
 
-  using BaseT = GuardObject<InitByteGlobalMutex>;
+  using BaseT = typename InitByteGlobalMutex::GuardObject;
   using BaseT::BaseT;
 
   explicit InitByteGlobalMutex(uint32_t *g) : BaseT(g), has_thread_id_support(false) {}
@@ -259,7 +267,7 @@ public:
   }
 
   void abort_init_byte() {
-    LockGuard g("__cxa_guard_acquire");
+    LockGuard g("__cxa_guard_abort");
     if (has_thread_id_support)
       *thread_id_address = 0;
     bool has_waiting = *init_byte_address & WAITING_BIT;
@@ -334,7 +342,7 @@ template <void (*Wait)(int*, int) = PlatformFutexWait,
           void (*Wake)(int*) = PlatformFutexWake,
           uint32_t (*GetThreadIDArg)() = PlatformThreadID>
 struct InitByteFutex : GuardObject<InitByteFutex<Wait, Wake, GetThreadIDArg>> {
-  using BaseT = GuardObject<InitByteFutex>;
+  using BaseT = typename InitByteFutex::GuardObject;
 
   /// ARM Constructor
   explicit InitByteFutex(uint32_t *g) : BaseT(g),
@@ -371,16 +379,22 @@ public:
         }
 
         if ((last_val & WAITING_BIT) == 0) {
+          // This compare exchange can fail for several reasons
+          // (1) another thread finished the whole thing before we got here
+          // (2) another thread set the waiting bit we were trying to thread
+          // (3) another thread had an exception and failed to finish
           if (!init_byte.compare_exchange(&last_val, PENDING_BIT | WAITING_BIT,
                                           std::_AO_Acq_Rel, std::_AO_Release)) {
+            // (1) success, via someone else's work!
             if (last_val == COMPLETE_BIT)
               return INIT_IS_DONE;
+            // (3) someone else, bailed on doing the work, retry from the start!
             if (last_val == 0)
               continue;
+            // (2) the waiting bit got set, so we are happy to keep waiting
           }
         }
-        Wait(static_cast<int*>(this->base_address),
-             expected_value_for_futex(PENDING_BIT | WAITING_BIT));
+        wait_on_initialization();
       }
     }
   }
@@ -388,7 +402,7 @@ public:
   void release_init_byte() {
     uint8_t old = init_byte.exchange(COMPLETE_BIT, std::_AO_Acq_Rel);
     if (old & WAITING_BIT)
-      Wake(static_cast<int*>(this->base_address));
+      wake_all();
   }
 
   void abort_init_byte() {
@@ -397,8 +411,18 @@ public:
 
     uint8_t old = init_byte.exchange(0, std::_AO_Acq_Rel);
     if (old & WAITING_BIT)
-      Wake(static_cast<int*>(this->base_address));
+      wake_all();
   }
+
+private:
+  /// Use the futex to wait on the current guard variable. Futex expects a
+  /// 32-bit 4-byte aligned address as the first argument, so we have to use use
+  /// the base address of the guard variable (not the init byte).
+  void wait_on_initialization() {
+    Wait(static_cast<int*>(this->base_address),
+         expected_value_for_futex(PENDING_BIT | WAITING_BIT));
+  }
+  void wake_all() { Wake(static_cast<int*>(this->base_address)); }
 
 private:
   AtomicInt<uint8_t> init_byte;
@@ -412,7 +436,7 @@ private:
   /// We pass the base address as the first argument, So this function creates
   /// an zero-initialized integer  with `b` copied at the correct offset.
   static int expected_value_for_futex(uint8_t b) {
-    int dest_val = {};
+    int dest_val = 0;
     std::memcpy(reinterpret_cast<char*>(&dest_val) + 1, &b, 1);
     return dest_val;
   }
@@ -437,15 +461,6 @@ enum class Implementation {
   Futex
 };
 
-constexpr Implementation CurrentImplementation =
-#if defined(_LIBCXXABI_HAS_NO_THREADS)
-    Implementation::NoThreads;
-#elif defined(_LIBCXXABI_USE_FUTEX)
-    Implementation::Futex;
-#else
-   Implementation::GlobalLock;
-#endif
-
 template <Implementation Impl>
 struct SelectImplementation;
 
@@ -466,6 +481,15 @@ struct SelectImplementation<Implementation::Futex> {
   using type =
       InitByteFutex<PlatformFutexWait, PlatformFutexWake, PlatformThreadID>;
 };
+
+constexpr Implementation CurrentImplementation =
+#if defined(_LIBCXXABI_HAS_NO_THREADS)
+    Implementation::NoThreads;
+#elif defined(_LIBCXXABI_USE_FUTEX)
+    Implementation::Futex;
+#else
+   Implementation::GlobalLock;
+#endif
 
 using SelectedImplementation =
     SelectImplementation<CurrentImplementation>::type;

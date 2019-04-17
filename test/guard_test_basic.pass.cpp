@@ -19,7 +19,7 @@ private:
   Impl impl;
 
   uint8_t first_byte() {
-    uint8_t first = {};
+    uint8_t first;
     std::memcpy(&first, &g, 1);
     return first;
   }
@@ -27,6 +27,9 @@ private:
   void reset() { g = {}; }
 
 public:
+  // Test the post conditions on cxa_guard_acquire, cxa_guard_abort, and
+  // cxa_guard_release. Specifically, that they leave the first byte with
+  // the value 0 or 1 as specified by the ARM or Itanium specification.
   static void test() {
     Tests tests;
     tests.test_acquire();

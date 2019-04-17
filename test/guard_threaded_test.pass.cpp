@@ -16,16 +16,20 @@
 using namespace __cxxabiv1;
 
 
-enum InitResult {
+enum class InitResult {
   COMPLETE,
   PERFORMED,
   WAITED,
   ABORTED
 };
+constexpr InitResult COMPLETE = InitResult::COMPLETE;
+constexpr InitResult PERFORMED = InitResult::PERFORMED;
+constexpr InitResult WAITED = InitResult::WAITED;
+constexpr InitResult ABORTED = InitResult::ABORTED;
 
 template <class Impl, class GuardType, class Init>
 InitResult check_guard(GuardType *g, Init init) {
-  uint8_t *first_byte = (uint8_t*)g;
+  uint8_t *first_byte = reinterpret_cast<uint8_t*>(g);
   if (std::__libcpp_atomic_load(first_byte, std::_AO_Acquire) == 0) {
     Impl impl(g);
     if (impl.cxa_guard_acquire() == INIT_IS_PENDING) {

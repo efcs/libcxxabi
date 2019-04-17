@@ -184,6 +184,8 @@ struct AtomicInt {
   using MemoryOrder = std::__libcpp_atomic_order;
 
   explicit AtomicInt(IntType *b) : b(b) {}
+  AtomicInt(AtomicInt const&) = delete;
+  AtomicInt& operator=(AtomicInt const&) = delete;
 
   IntType load(MemoryOrder ord) {
     return std::__libcpp_atomic_load(b, ord);
@@ -199,9 +201,6 @@ struct AtomicInt {
   }
 
 private:
-  AtomicInt(AtomicInt const&) = delete;
-  AtomicInt& operator=(AtomicInt const&) = delete;
-
   IntType *b;
 };
 
