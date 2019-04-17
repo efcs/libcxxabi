@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// UNSUPPORTED: c++98, c++03
 
 #define ABORT_WITH_MESSAGE(...) __builtin_abort()
 #include "../src/cxa_guard_impl.h"

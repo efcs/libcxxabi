@@ -6,6 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+// UNSUPPORTED: c++98, c++03
+// UNSUPPORTED: libcxxabi-no-threads
 
 #define ABORT_WITH_MESSAGE(...) __builtin_abort()
 #include "../src/cxa_guard_impl.h"
@@ -14,7 +16,6 @@
 
 
 using namespace __cxxabiv1;
-
 
 enum class InitResult {
   COMPLETE,
@@ -51,12 +52,10 @@ InitResult check_guard(GuardType *g, Init init) {
   return COMPLETE;
 }
 
-
 template <class GuardType, class Impl>
 struct Tests {
 private:
   Tests() = delete;
-
 public:
   static void test() {
     GuardType g;
