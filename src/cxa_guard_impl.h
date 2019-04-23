@@ -519,11 +519,13 @@ constexpr Implementation CurrentImplementation =
 #if defined(_LIBCXXABI_HAS_NO_THREADS)
     Implementation::NoThreads;
 #elif defined(_LIBCXXABI_USE_FUTEX)
-    DoesPlatformSupportFutex() ? Implementation::Futex
-                               : Implementation::GlobalLock;
+    Implementation::Futex;
 #else
    Implementation::GlobalLock;
 #endif
+
+static_assert(CurrentImplementation != Implementation::Futex
+           || DoesPlatformSupportFutex(), "Futex selected but not supported");
 
 using SelectedImplementation =
     SelectImplementation<CurrentImplementation>::type;
