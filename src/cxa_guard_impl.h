@@ -519,7 +519,8 @@ constexpr Implementation CurrentImplementation =
 #if defined(_LIBCXXABI_HAS_NO_THREADS)
     Implementation::NoThreads;
 #elif defined(_LIBCXXABI_USE_FUTEX)
-    Implementation::Futex;
+    DoesPlatformSupportFutex() ? Implementation::Futex
+                               : Implementation::GlobalLock;
 #else
    Implementation::GlobalLock;
 #endif
