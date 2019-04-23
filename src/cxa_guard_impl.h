@@ -115,6 +115,18 @@ uint32_t PlatformThreadID() {
 constexpr uint32_t (*PlatformThreadID)() = nullptr;
 #endif
 
+
+constexpr bool DoesPlatformSupportThreadID() {
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wtautological-pointer-compare"
+#endif
+  return +PlatformThreadID != nullptr;
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+}
+
 //===----------------------------------------------------------------------===//
 //                          GuardBase
 //===----------------------------------------------------------------------===//
@@ -250,8 +262,10 @@ struct InitByteGlobalMutex
   using BaseT = typename InitByteGlobalMutex::GuardObject;
   using BaseT::BaseT;
 
-  explicit InitByteGlobalMutex(uint32_t *g) : BaseT(g), has_thread_id_support(false) {}
-  explicit InitByteGlobalMutex(uint64_t *g) : BaseT(g), has_thread_id_support(GetThreadID) {}
+  explicit InitByteGlobalMutex(uint32_t *g)
+    : BaseT(g), has_thread_id_support(false) {}
+  explicit InitByteGlobalMutex(uint64_t *g)
+    : BaseT(g), has_thread_id_support(DoesPlatformSupportThreadID()) {}
 
 public:
   AcquireResult acquire_init_byte() {
