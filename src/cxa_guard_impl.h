@@ -509,6 +509,8 @@ struct SelectImplementation<Implementation::Futex> {
       InitByteFutex<PlatformFutexWait, PlatformFutexWake, PlatformThreadID>;
 };
 
+// TODO(EricWF): We should prefer the futex implementation when available. But
+// it should be done in a separate step from adding the implementation.
 constexpr Implementation CurrentImplementation =
 #if defined(_LIBCXXABI_HAS_NO_THREADS)
     Implementation::NoThreads;
