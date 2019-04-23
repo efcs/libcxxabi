@@ -8,7 +8,7 @@
 //
 // UNSUPPORTED: c++98, c++03
 
-#define ABORT_WITH_MESSAGE(...) __builtin_abort()
+#define TESTING_CXA_GUARD
 #include "../src/cxa_guard_impl.h"
 
 using namespace __cxxabiv1;

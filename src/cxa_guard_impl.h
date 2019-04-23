@@ -43,18 +43,33 @@
 #include <sys/syscall.h>
 #include <sys/types.h>
 
-#ifndef ABORT_WITH_MESSAGE
-#include "abort_message.h"
-#define ABORT_WITH_MESSAGE(...) ::abort_message(__VA_ARGS__)
-#endif
-
+#include <stdlib.h>
 #include <__threading_support>
 
-namespace __cxxabiv1 {
+// To make testing possible, this header is included from both cxa_guard.cpp
+// and a number of tests.
+//
+// For this reason we place everything in an anonymous namespace -- even though
+// we're in a header. We want the actual implementation and the tests to have
+// unique definitions of the types in this header (since the tests may depend
+// on function local statics).
+//
+// To enforce this either `BUILDING_CXA_GUARD` or `TESTING_CXA_GUARD` must be
+// defined when including this file. Only `src/cxa_guard.cpp` should define
+// the former.
+#ifdef BUILDING_CXA_GUARD
+# include "abort_message.h"
+# define ABORT_WITH_MESSAGE(...) ::abort_message(__VA_ARGS__)
+#elif defined(TESTING_CXA_GUARD)
+# define ABORT_WITH_MESSAGE(...) ::abort()
+#else
+# error "Either BUILDING_CXA_GUARD or TESTING_CXA_GUARD must be defined"
+#endif
 
-// Place everything in an anonymous namespace -- even though we're in a header.
-// This header is only included by cxa_guard.cpp and tests, and it's OK for the
-// tests to have unique definitions of these types.
+
+namespace __cxxabiv1 {
+// Use an anonymous namespace to ensure that the tests and actual implementation
+// have unique definitions of these symbols.
 namespace {
 
 //===----------------------------------------------------------------------===//
@@ -107,6 +122,7 @@ enum class AcquireResult {
 constexpr AcquireResult INIT_IS_DONE = AcquireResult::INIT_IS_DONE;
 constexpr AcquireResult INIT_IS_PENDING = AcquireResult::INIT_IS_PENDING;
 
+static constexpr uint8_t UNSET = 0;
 static constexpr uint8_t COMPLETE_BIT = (1 << 0);
 static constexpr uint8_t PENDING_BIT = (1 << 1);
 static constexpr uint8_t WAITING_BIT = (1 << 2);
@@ -156,7 +172,7 @@ public:
   /// The address of the byte used by the implementation during initialization.
   uint8_t* const init_byte_address;
   /// An optional address storing an identifier for the thread performing initialization.
-  /// It's uned to detect recursive initialization.
+  /// It's used to detect recursive initialization.
   uint32_t* const thread_id_address;
 
 private:
@@ -180,7 +196,7 @@ struct InitByteNoThreads : GuardObject<InitByteNoThreads> {
   }
 
   void release_init_byte() { *init_byte_address = COMPLETE_BIT; }
-  void abort_init_byte() { *init_byte_address = 0; }
+  void abort_init_byte() { *init_byte_address = UNSET; }
 };
 
 
@@ -259,25 +275,36 @@ public:
   }
 
   void release_init_byte() {
-    LockGuard g("__cxa_guard_release");
-    bool has_waiting = *init_byte_address & WAITING_BIT;
-    *init_byte_address = COMPLETE_BIT;
-    if (has_waiting)
-      g.release_and_broadcast();
+    bool has_waiting;
+    {
+      LockGuard g("__cxa_guard_release");
+      has_waiting = *init_byte_address & WAITING_BIT;
+      *init_byte_address = COMPLETE_BIT;
+    }
+    if (has_waiting) {
+      if (global_cond.broadcast()) {
+        ABORT_WITH_MESSAGE("%s failed to broadcast", "__cxa_guard_release");
+      }
+    }
   }
 
   void abort_init_byte() {
-    LockGuard g("__cxa_guard_abort");
-    if (has_thread_id_support)
-      *thread_id_address = 0;
-    bool has_waiting = *init_byte_address & WAITING_BIT;
-    *init_byte_address = 0;
-    if (has_waiting)
-      g.release_and_broadcast();
+    bool has_waiting;
+    {
+      LockGuard g("__cxa_guard_abort");
+      if (has_thread_id_support)
+        *thread_id_address = 0;
+      has_waiting = *init_byte_address & WAITING_BIT;
+      *init_byte_address = UNSET;
+    }
+    if (has_waiting) {
+      if (global_cond.broadcast()) {
+        ABORT_WITH_MESSAGE("%s failed to broadcast", "__cxa_guard_abort");
+      }
+    }
   }
 
 private:
-
   using BaseT::init_byte_address;
   using BaseT::thread_id_address;
   const bool has_thread_id_support;
@@ -285,36 +312,23 @@ private:
 
 private:
   struct LockGuard {
-    explicit LockGuard(const char* calling_func)
-        : calling_func(calling_func), locked(false) {
-      if (global_mutex.lock())
-        ABORT_WITH_MESSAGE("%s failed to acquire mutex", calling_func);
-      locked = true;
-    }
-
-    void release() {
-      if (locked) {
-        if (global_mutex.unlock())
-          ABORT_WITH_MESSAGE("%s failed to release mutex", calling_func);
-        locked = false;
-      }
-    }
-
-    void release_and_broadcast() {
-      release();
-      if (global_cond.broadcast())
-        ABORT_WITH_MESSAGE("%s failed to broadcast", calling_func);
-    }
-
-    ~LockGuard() { release(); }
-
-  private:
     LockGuard() = delete;
     LockGuard(LockGuard const&) = delete;
     LockGuard& operator=(LockGuard const&) = delete;
 
+    explicit LockGuard(const char* calling_func)
+        : calling_func(calling_func)  {
+      if (global_mutex.lock())
+        ABORT_WITH_MESSAGE("%s failed to acquire mutex", calling_func);
+    }
+
+    ~LockGuard() {
+      if (global_mutex.unlock())
+        ABORT_WITH_MESSAGE("%s failed to release mutex", calling_func);
+    }
+
+  private:
     const char* const calling_func;
-    bool locked;
   };
 };
 
@@ -335,6 +349,17 @@ void PlatformFutexWake(int* addr) {
 constexpr void (*PlatformFutexWait)(int*, int) = nullptr;
 constexpr void (*PlatformFutexWake)(int*) = nullptr;
 #endif
+
+constexpr bool DoesPlatformSupportFutex() {
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wtautological-pointer-compare"
+#endif
+  return +PlatformFutexWait != nullptr;
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+}
 
 /// InitByteFutex - Manages initialization using atomics and the futex syscall
 /// for waiting and waking.
@@ -359,7 +384,7 @@ struct InitByteFutex : GuardObject<InitByteFutex<Wait, Wake, GetThreadIDArg>> {
 public:
   AcquireResult acquire_init_byte() {
     while (true) {
-      uint8_t last_val = 0;
+      uint8_t last_val = UNSET;
       if (init_byte.compare_exchange(&last_val, PENDING_BIT, std::_AO_Acq_Rel,
                                      std::_AO_Acquire)) {
         if (has_thread_id_support) {
@@ -388,9 +413,11 @@ public:
             // (1) success, via someone else's work!
             if (last_val == COMPLETE_BIT)
               return INIT_IS_DONE;
+
             // (3) someone else, bailed on doing the work, retry from the start!
-            if (last_val == 0)
+            if (last_val == UNSET)
               continue;
+
             // (2) the waiting bit got set, so we are happy to keep waiting
           }
         }

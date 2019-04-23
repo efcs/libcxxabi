@@ -180,7 +180,8 @@ _LIBCPP_END_NAMESPACE_STD
 namespace {
 
 template <class IntType>
-struct AtomicInt {
+class AtomicInt {
+public:
   using MemoryOrder = std::__libcpp_atomic_order;
 
   explicit AtomicInt(IntType *b) : b(b) {}
