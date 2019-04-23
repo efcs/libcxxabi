@@ -40,8 +40,12 @@
 #include "__cxxabi_config.h"
 #include "include/atomic_support.h"
 #include <unistd.h>
-#include <sys/syscall.h>
 #include <sys/types.h>
+#if defined(__has_include)
+# if __has_include(<sys/syscall.h>)
+#   include <sys/syscall.h>
+# endif
+#endif
 
 #include <stdlib.h>
 #include <__threading_support>
