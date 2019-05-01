@@ -28,7 +28,7 @@ constexpr int ThreadsPerTest = 10;
 // The number of instances of a test to run concurrently.
 constexpr int ConcurrentRunsPerTest = 10;
 // The number of times to rerun each test.
-constexpr int TestSamples = 10;
+constexpr int TestSamples = 500000;
 // Check potentially racy assertions
 constexpr bool EnableRacyAssertions = true;
 
@@ -323,14 +323,15 @@ void test_impl() {
   };
 
   for (auto test_func : TestList) {
-    for (int I=0; I < TestSamples; ++I) {
       ThreadGroup test_threads;
-      test_threads.CreateThreadsWithBarrier(ConcurrentRunsPerTest,
-         [=](){ test_func(ThreadsPerTest); });
+      test_threads.CreateThreadsWithBarrier(ConcurrentRunsPerTest, [=]() {
+        for (int I = 0; I < TestSamples; ++I) {
+          test_func(ThreadsPerTest);
+        }
+      });
       test_threads.JoinAll();
     }
   }
-}
 
 void test_all_impls() {
   using MutexImpl = SelectImplementation<Implementation::GlobalLock>::type;
