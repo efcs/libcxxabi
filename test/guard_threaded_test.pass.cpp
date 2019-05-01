@@ -28,9 +28,9 @@ constexpr int ThreadsPerTest = 10;
 // The number of instances of a test to run concurrently.
 constexpr int ConcurrentRunsPerTest = 10;
 // The number of times to rerun each test.
-constexpr int TestSamples = 500000;
+constexpr int TestSamples = 500;
 // Check potentially racy assertions
-constexpr bool EnableRacyAssertions = true;
+constexpr bool EnableRacyAssertions = false;
 
 
 void BusyWait() {
@@ -38,12 +38,12 @@ void BusyWait() {
 }
 
 void YieldAfterBarrier() {
-  std::this_thread::sleep_for(std::chrono::nanoseconds(1000));
+  std::this_thread::sleep_for(std::chrono::nanoseconds(10));
   std::this_thread::yield();
 }
 
 struct Barrier {
-  explicit Barrier(int n) : m_threads(n), m_remaining(n), m_exited(0) { }
+  explicit Barrier(int n) : m_threads(n), m_remaining(n) { }
   Barrier(Barrier const&) = delete;
   Barrier& operator=(Barrier const&) = delete;
 
@@ -52,12 +52,10 @@ struct Barrier {
     while (m_remaining.load()) {
       BusyWait();
     }
-    ++m_exited;
   }
 
   void arrive_and_drop()  const {
     --m_remaining;
-    ++m_exited;
   }
 
   void wait_for_threads(int n) const {
@@ -69,7 +67,6 @@ struct Barrier {
 private:
   const int m_threads;
   mutable std::atomic<int> m_remaining;
-  mutable std::atomic<int> m_exited;
 };
 
 
