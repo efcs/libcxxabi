@@ -22,40 +22,56 @@
 
 using namespace __cxxabiv1;
 
+// Misc test configuration. It's used to tune the flakyness of the test.
+// ThreadsPerTest - The number of threads used
+constexpr int ThreadsPerTest = 10;
+// The number of instances of a test to run concurrently.
+constexpr int ConcurrentRunsPerTest = 10;
+// The number of times to rerun each test.
+constexpr int TestSamples = 10;
+// Check potentially racy assertions
+constexpr bool EnableRacyAssertions = true;
+
+
+void BusyWait() {
+    std::this_thread::yield();
+}
+
+void YieldAfterBarrier() {
+  std::this_thread::sleep_for(std::chrono::nanoseconds(1000));
+  std::this_thread::yield();
+}
 
 struct Barrier {
-  explicit Barrier(int n) : m_remaining(n), m_waiting(0) { }
+  explicit Barrier(int n) : m_threads(n), m_remaining(n), m_exited(0) { }
   Barrier(Barrier const&) = delete;
   Barrier& operator=(Barrier const&) = delete;
 
   void arrive_and_wait() const {
-    ++m_waiting;
     --m_remaining;
     while (m_remaining.load()) {
-      assert(m_remaining.load() >= 0);
-      std::this_thread::yield();
+      BusyWait();
     }
-    --m_waiting;
+    ++m_exited;
   }
 
-  void arrive_and_drop()  const{
+  void arrive_and_drop()  const {
     --m_remaining;
+    ++m_exited;
   }
 
   void wait_for_threads(int n) const {
-    while (m_waiting.load() < n) {
+    while ((m_threads - m_remaining.load()) < n) {
       std::this_thread::yield();
     }
   }
 
-  int num_waiting() const {
-    return m_waiting.load();
-  }
-
 private:
+  const int m_threads;
   mutable std::atomic<int> m_remaining;
-  mutable std::atomic<int> m_waiting;
+  mutable std::atomic<int> m_exited;
 };
+
 
 enum class InitResult {
   COMPLETE,
@@ -96,46 +112,27 @@ InitResult check_guard(GuardType *g, Init init) {
 
 template <class GuardType, class Impl>
 struct FunctionLocalStatic {
-  FunctionLocalStatic() { reset(); }
+  FunctionLocalStatic() {}
   FunctionLocalStatic(FunctionLocalStatic const&) = delete;
 
   template <class InitFunc>
   InitResult access(InitFunc&& init) {
-    ++waiting_threads;
     auto res = check_guard<Impl>(&guard_object, init);
     ++result_counts[static_cast<int>(res)];
-    --waiting_threads;
     return res;
   }
 
-
   template <class InitFn>
   struct AccessCallback {
-    template <class InitArg>
-    explicit AccessCallback(FunctionLocalStatic *obj, InitArg&& init) : this_obj(obj),
-      init(std::forward<InitArg>(init)) {}
+    void operator()() const { this_obj->access(init); }
 
-
-
-    void operator()() const {
-      this_obj->access(init);
-    }
-  private:
     FunctionLocalStatic *this_obj;
     InitFn init;
   };
 
   template <class InitFn, class Callback = AccessCallback< InitFn >  >
   Callback access_callback(InitFn init) {
-    return Callback(this, init);
-  }
-
-  void reset() {
-    guard_object = 0;
-    waiting_threads.store(0);
-    for (auto& counter : result_counts) {
-      counter.store(0);
-    }
+    return Callback{this, init};
   }
 
   int get_count(InitResult I) const {
@@ -151,9 +148,9 @@ struct FunctionLocalStatic {
   }
 
 private:
-  GuardType guard_object;
-  std::atomic<int> waiting_threads;
-  std::array<std::atomic<int>, 4> result_counts;
+  GuardType guard_object = {};
+  std::atomic<int> waiting_threads{0};
+  std::array<std::atomic<int>, 4> result_counts{};
   static_assert(static_cast<int>(ABORTED) == 3, "only 4 result kinds expected");
 };
 
@@ -168,14 +165,14 @@ struct ThreadGroup {
 
   template <class Callback>
   void CreateThreadsWithBarrier(int N, Callback cb) {
-    Barrier start(N + 1);
+    auto start = std::make_shared<Barrier>(N + 1);
     for (int I=0; I < N; ++I) {
-      Create([&start, cb]() {
-        start.arrive_and_wait();
+      Create([start, cb]() {
+        start->arrive_and_wait();
         cb();
       });
     }
-    start.arrive_and_wait();
+    start->arrive_and_wait();
   }
 
   void JoinAll() {
@@ -190,36 +187,48 @@ private:
 
 
 template <class GuardType, class Impl>
-void test_free_for_all() {
+void test_free_for_all(int num_waiters) {
   FunctionLocalStatic<GuardType, Impl> test_obj;
 
   ThreadGroup threads;
 
-  //bool already_init = false;
-  threads.CreateThreadsWithBarrier(10,
-    [&]() { test_obj.access([](){}); }
+  bool already_init = false;
+  threads.CreateThreadsWithBarrier(num_waiters,
+    test_obj.access_callback([&]() {
+      assert(!already_init);
+      already_init = true;
+    })
   );
 
   // wait for the other threads to finish initialization.
   threads.JoinAll();
-  assert(false);
+
   assert(test_obj.get_count(PERFORMED) == 1);
-  assert(test_obj.get_count(COMPLETE) + test_obj.get_count(WAITED) == 9);
+  assert(test_obj.get_count(COMPLETE) + test_obj.get_count(WAITED) == num_waiters - 1);
 }
 
 template <class GuardType, class Impl>
-void test_waiting_for_init() {
+void test_waiting_for_init(int num_waiters) {
     FunctionLocalStatic<GuardType, Impl> test_obj;
 
     ThreadGroup threads;
 
     Barrier start_init(2);
     threads.Create(test_obj.access_callback(
-      [&]() { start_init.arrive_and_wait(); }
+      [&]() {
+        start_init.arrive_and_wait();
+        // Take our sweet time completing the initialization...
+        //
+        // There's a race condition between the other threads reaching the
+        // start_init barrier, and them actually hitting the cxa guard.
+        // But we're trying to test the waiting logic, we want as many
+        // threads to enter the waiting loop as possible.
+        YieldAfterBarrier();
+      }
     ));
     start_init.wait_for_threads(1);
 
-    threads.CreateThreadsWithBarrier(10,
+    threads.CreateThreadsWithBarrier(num_waiters,
         test_obj.access_callback([]() { assert(false); })
     );
     // unblock the initializing thread
@@ -229,35 +238,37 @@ void test_waiting_for_init() {
     threads.JoinAll();
 
     assert(test_obj.get_count(PERFORMED) == 1);
-    assert(test_obj.get_count(WAITED) == 10);
-    assert(test_obj.get_count(COMPLETE) == 0);
+    assert(test_obj.get_count(ABORTED) == 0);
+    if (EnableRacyAssertions) {
+      assert(test_obj.get_count(WAITED) == num_waiters);
+      assert(test_obj.get_count(COMPLETE) == 0);
+    }
+    assert(test_obj.get_count(COMPLETE) + test_obj.get_count(WAITED) == num_waiters);
 }
 
 
 template <class GuardType, class Impl>
-void test_aborted_init() {
-  Barrier start_init(2); // plus this thread
-
+void test_aborted_init(int num_waiters) {
   FunctionLocalStatic<GuardType, Impl> test_obj;
 
+  Barrier start_init(2);
   ThreadGroup threads;
   threads.Create(test_obj.access_callback(
     [&]() {
       start_init.arrive_and_wait();
+      YieldAfterBarrier();
       throw 42;
     })
   );
   start_init.wait_for_threads(1);
 
-
   bool already_init = false;
-  threads.CreateThreadsWithBarrier(10,
+  threads.CreateThreadsWithBarrier(num_waiters,
       test_obj.access_callback([&]() {
         assert(!already_init);
         already_init = true;
       })
     );
-
   // unblock the initializing thread
   start_init.arrive_and_drop();
 
@@ -266,23 +277,26 @@ void test_aborted_init() {
 
   assert(test_obj.get_count(ABORTED) == 1);
   assert(test_obj.get_count(PERFORMED) == 1);
-  assert(test_obj.get_count(WAITED) == 9);
-  assert(test_obj.get_count(COMPLETE) == 0);
+  if (EnableRacyAssertions) {
+    assert(test_obj.get_count(WAITED) == num_waiters - 1);
+    assert(test_obj.get_count(COMPLETE) == 0);
+  }
+  assert(test_obj.get_count(WAITED) + test_obj.get_count(COMPLETE) == num_waiters - 1);
 }
 
 
 template <class GuardType, class Impl>
-void test_completed_init() {
+void test_completed_init(int num_waiters) {
 
   FunctionLocalStatic<GuardType, Impl> test_obj;
 
-  test_obj.access([]() {});
+  test_obj.access([]() {}); // initialize the object
   assert(test_obj.num_waiting() == 0);
   assert(test_obj.num_completed() == 1);
   assert(test_obj.get_count(PERFORMED) == 1);
 
   ThreadGroup threads;
-  threads.CreateThreadsWithBarrier(10,
+  threads.CreateThreadsWithBarrier(num_waiters,
       test_obj.access_callback([]() { assert(false); })
   );
   // wait for the other threads to finish initialization.
@@ -291,27 +305,30 @@ void test_completed_init() {
   assert(test_obj.get_count(ABORTED) == 0);
   assert(test_obj.get_count(PERFORMED) == 1);
   assert(test_obj.get_count(WAITED) == 0);
-  assert(test_obj.get_count(COMPLETE) == 10);
+  assert(test_obj.get_count(COMPLETE) == num_waiters);
 }
 
 template <class Impl>
 void test_impl() {
-  {
-    test_free_for_all<uint32_t, Impl>();
-    //test_free_for_all<uint32_t, Impl>();
-  }
-  return;
-  {
-    test_waiting_for_init<uint32_t, Impl>();
-    test_waiting_for_init<uint64_t, Impl>();
-  }
-  {
-    test_aborted_init<uint32_t, Impl>();
-    test_aborted_init<uint64_t, Impl>();
-  }
-  {
-    test_completed_init<uint32_t, Impl>();
-    test_completed_init<uint64_t, Impl>();
+  using TestFn = void(*)(int);
+  TestFn TestList[] = {
+    test_free_for_all<uint32_t, Impl>,
+    test_free_for_all<uint32_t, Impl>,
+    test_waiting_for_init<uint32_t, Impl>,
+    test_waiting_for_init<uint64_t, Impl>,
+    test_aborted_init<uint32_t, Impl>,
+    test_aborted_init<uint64_t, Impl>,
+    test_completed_init<uint32_t, Impl>,
+    test_completed_init<uint64_t, Impl>
+  };
+
+  for (auto test_func : TestList) {
+    for (int I=0; I < TestSamples; ++I) {
+      ThreadGroup test_threads;
+      test_threads.CreateThreadsWithBarrier(ConcurrentRunsPerTest,
+         [=](){ test_func(ThreadsPerTest); });
+      test_threads.JoinAll();
+    }
   }
 }
 
@@ -320,19 +337,19 @@ void test_all_impls() {
 
   // Attempt to test the Futex based implementation if it's supported on the
   // target platform.
-  //using RealFutexImpl = SelectImplementation<Implementation::Futex>::type;
-//  using FutexImpl = typename std::conditional<
-  //    PlatformSupportsFutex(),
-    //  RealFutexImpl,
-      //MutexImpl
- // >::type;
+  using RealFutexImpl = SelectImplementation<Implementation::Futex>::type;
+  using FutexImpl = typename std::conditional<
+      PlatformSupportsFutex(),
+      RealFutexImpl,
+      MutexImpl
+  >::type;
 
   // Run each test 5 times to help TSAN catch bugs.
-  const int num_runs = 5;
-  for (int i=0; i < num_runs; ++i) {
+  //const int num_runs = 5;
+  for (int i=0; i < 1; ++i) {
     test_impl<MutexImpl>();
-   // if (PlatformSupportsFutex())
-   //   test_impl<FutexImpl>();
+    if (PlatformSupportsFutex())
+      test_impl<FutexImpl>();
   }
 }
 
@@ -374,5 +391,5 @@ int main() {
   // Test each multi-threaded implementation with real threads.
   test_all_impls();
   // Test the basic sanity of the futex syscall wrappers.
-  //test_futex_syscall();
+  test_futex_syscall();
 }
